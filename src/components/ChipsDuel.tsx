@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-
+import chipImg from "@/assets/chip.png";
 const CELLS = 9;
 const BOMBS = 3;
 const LIVES = 3;
@@ -42,14 +42,14 @@ function Hearts({ count }: { count: number }) {
 }
 
 function Cell({ state, dimmed, onClick }: { state: CellState; dimmed: boolean; onClick?: () => void }) {
-  const base = "w-9 h-9 flex items-center justify-center text-base rounded-sm border transition-all duration-150";
+  const base = "w-9 h-9 flex items-center justify-center rounded-sm border transition-all duration-150";
   let bg: string;
-  let emoji = EMOJI.hidden;
+  let content: React.ReactNode = <img src={chipImg} alt="chip" className="w-7 h-7 object-contain" />;
   let clickable = !!onClick;
 
-  if (state === "marked") { bg = "bg-destructive border-destructive/60"; emoji = EMOJI.mark; clickable = false; }
-  else if (state === "revealed-safe") { bg = "bg-[hsl(var(--cell-safe))] border-[hsl(var(--cell-safe-border))]"; emoji = EMOJI.safe; clickable = false; }
-  else if (state === "revealed-bomb") { bg = "bg-[hsl(var(--cell-bomb))] border-[hsl(var(--cell-bomb-border))]"; emoji = EMOJI.bomb; clickable = false; }
+  if (state === "marked") { bg = "bg-destructive border-destructive/60"; content = <span className="text-base">☠️</span>; clickable = false; }
+  else if (state === "revealed-safe") { bg = "bg-[hsl(var(--cell-safe))] border-[hsl(var(--cell-safe-border))]"; content = <span className="text-base">😋</span>; clickable = false; }
+  else if (state === "revealed-bomb") { bg = "bg-[hsl(var(--cell-bomb))] border-[hsl(var(--cell-bomb-border))]"; content = <span className="text-base">💣</span>; clickable = false; }
   else if (dimmed) { bg = "bg-[hsl(var(--cell-dim))] border-[hsl(var(--cell-dim-border))]"; clickable = false; }
   else { bg = "bg-primary border-primary/60 shadow-[inset_-1px_-1px_0] shadow-primary/30"; }
 
@@ -58,7 +58,7 @@ function Cell({ state, dimmed, onClick }: { state: CellState; dimmed: boolean; o
       className={`${base} ${bg} ${clickable ? "cursor-pointer active:scale-90" : "cursor-default"}`}
       onClick={clickable ? onClick : undefined}
     >
-      {emoji}
+      {content}
     </div>
   );
 }
@@ -154,17 +154,7 @@ export default function ChipsDuel() {
     });
   }, []);
 
-  const confirm = useCallback(() => {
-    setG(prev => {
-      const g = structuredClone(prev);
-      if (g.phase === "p1-setup" && g.p1Bombs.length === BOMBS) {
-        g.p2Board = g.p2Board.map(c => c === "marked" ? "hidden" : c); g.phase = "p2-setup";
-      } else if (g.phase === "p2-setup" && g.p2Bombs.length === BOMBS) {
-        g.p1Board = g.p1Board.map(c => c === "marked" ? "hidden" : c); g.phase = "playing"; g.cur = 1;
-      }
-      return g;
-    });
-  }, []);
+  // confirm больше не нужен — автопереход в setupClick
 
   const playClick = useCallback((owner: 1 | 2, i: number) => {
     setG(prev => {
