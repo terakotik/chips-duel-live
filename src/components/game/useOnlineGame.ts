@@ -105,8 +105,17 @@ export function useOnlineGame(): OnlineGameReturn {
 
       pc.oniceconnectionstatechange = () => {
         const s = pc.iceConnectionState;
+        console.log("[webrtc] ICE state:", s);
         if (s === "connected" || s === "completed") setConnected(true);
         if (s === "disconnected" || s === "failed") setConnected(false);
+      };
+
+      pc.onicegatheringstatechange = () => {
+        console.log("[webrtc] ICE gathering state:", pc.iceGatheringState);
+      };
+
+      pc.onsignalingstatechange = () => {
+        console.log("[webrtc] signaling state:", pc.signalingState);
       };
 
       if (isHost) {
