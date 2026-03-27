@@ -42,16 +42,16 @@ function Hearts({ count }: { count: number }) {
 }
 
 function Cell({ state, dimmed, onClick }: { state: CellState; dimmed: boolean; onClick?: () => void }) {
-  const base = "w-10 h-10 flex items-center justify-center text-lg border-2 rounded-sm transition-all duration-150";
+  const base = "w-9 h-9 flex items-center justify-center text-base rounded-sm border transition-all duration-150";
   let bg: string;
   let emoji = EMOJI.hidden;
   let clickable = !!onClick;
 
-  if (state === "marked") { bg = "bg-destructive border-destructive"; emoji = EMOJI.mark; clickable = false; }
+  if (state === "marked") { bg = "bg-destructive border-destructive/60"; emoji = EMOJI.mark; clickable = false; }
   else if (state === "revealed-safe") { bg = "bg-[hsl(var(--cell-safe))] border-[hsl(var(--cell-safe-border))]"; emoji = EMOJI.safe; clickable = false; }
   else if (state === "revealed-bomb") { bg = "bg-[hsl(var(--cell-bomb))] border-[hsl(var(--cell-bomb-border))]"; emoji = EMOJI.bomb; clickable = false; }
   else if (dimmed) { bg = "bg-[hsl(var(--cell-dim))] border-[hsl(var(--cell-dim-border))]"; clickable = false; }
-  else { bg = "bg-primary border-border shadow-[inset_-2px_-2px_0] shadow-primary/30"; }
+  else { bg = "bg-primary border-primary/60 shadow-[inset_-1px_-1px_0] shadow-primary/30"; }
 
   return (
     <div
@@ -71,23 +71,20 @@ function BoardGrid({ board, owner, G, onSetupClick, onPlayClick }: {
   const isP1S = G.phase === "p1-setup";
 
   return (
-    <div className="flex flex-col items-center gap-1">
-      <span className="text-[7px] text-muted-foreground">P{owner}</span>
-      <div className="grid grid-cols-3 gap-1 bg-[hsl(var(--board-bg))] p-1.5 rounded-md border-2 border-[hsl(var(--board-border))] shadow-lg">
+    <div className="flex flex-col items-center gap-0.5">
+      <span className="text-[6px] text-foreground/50">P{owner}</span>
+      <div className="grid grid-cols-3 gap-[3px] bg-[hsl(var(--board-bg))] p-1 rounded border border-[hsl(var(--board-border))]">
         {board.map((c, i) => {
           let dimmed = false;
           let click: (() => void) | undefined;
 
           if (isSetup && c === "hidden") {
-            if ((isP1S && owner === 2) || (!isP1S && owner === 1)) {
-              click = () => onSetupClick(i);
-            } else { dimmed = true; }
+            if ((isP1S && owner === 2) || (!isP1S && owner === 1)) click = () => onSetupClick(i);
+            else dimmed = true;
           } else if (G.phase === "playing" && c === "hidden") {
-            if ((G.cur === 1 && owner === 2) || (G.cur === 2 && owner === 1)) {
-              click = () => onPlayClick(owner, i);
-            } else { dimmed = true; }
+            if ((G.cur === 1 && owner === 2) || (G.cur === 2 && owner === 1)) click = () => onPlayClick(owner, i);
+            else dimmed = true;
           }
-
           if (c !== "hidden") { click = undefined; dimmed = false; }
 
           return <Cell key={i} state={c} dimmed={dimmed} onClick={click} />;
@@ -97,7 +94,7 @@ function BoardGrid({ board, owner, G, onSetupClick, onPlayClick }: {
   );
 }
 
-function VideoZone({ id, facingMode, children }: { id: string; facingMode: string; children: React.ReactNode }) {
+function VideoZone({ id, facingMode }: { id: string; facingMode: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -112,22 +109,16 @@ function VideoZone({ id, facingMode, children }: { id: string; facingMode: strin
         v.autoplay = true;
         v.playsInline = true;
         v.muted = true;
-        v.className = "w-full h-full object-cover absolute top-0 left-0";
-        el.prepend(v);
+        v.className = "w-full h-full object-cover";
+        el.appendChild(v);
       })
       .catch(() => {});
-
-    return () => {
-      streamRef.current?.getTracks().forEach(t => t.stop());
-    };
+    return () => { streamRef.current?.getTracks().forEach(t => t.stop()); };
   }, [facingMode]);
 
   return (
-    <div ref={ref} id={id} className="h-[22%] w-full relative bg-secondary shrink-0">
-      <div className="w-full h-full flex items-center justify-center text-3xl bg-secondary">
-        {id === "v1" ? "👱‍♀️" : "🧔"}
-      </div>
-      {children}
+    <div ref={ref} id={id} className="w-full h-full bg-secondary flex items-center justify-center text-3xl">
+      {id === "v1" ? "👱‍♀️" : "🧔"}
     </div>
   );
 }
@@ -136,10 +127,8 @@ export default function ChipsDuel() {
   const [G, setG] = useState<GameState>(freshState);
 
   const start = () => setG({
-    ...freshState(),
-    phase: "p1-setup",
-    p1Board: Array(CELLS).fill("hidden"),
-    p2Board: Array(CELLS).fill("hidden"),
+    ...freshState(), phase: "p1-setup",
+    p1Board: Array(CELLS).fill("hidden"), p2Board: Array(CELLS).fill("hidden"),
   });
 
   const setupClick = useCallback((i: number) => {
@@ -161,12 +150,9 @@ export default function ChipsDuel() {
     setG(prev => {
       const g = structuredClone(prev);
       if (g.phase === "p1-setup" && g.p1Bombs.length === BOMBS) {
-        g.p2Board = g.p2Board.map(c => c === "marked" ? "hidden" : c);
-        g.phase = "p2-setup";
+        g.p2Board = g.p2Board.map(c => c === "marked" ? "hidden" : c); g.phase = "p2-setup";
       } else if (g.phase === "p2-setup" && g.p2Bombs.length === BOMBS) {
-        g.p1Board = g.p1Board.map(c => c === "marked" ? "hidden" : c);
-        g.phase = "playing";
-        g.cur = 1;
+        g.p1Board = g.p1Board.map(c => c === "marked" ? "hidden" : c); g.phase = "playing"; g.cur = 1;
       }
       return g;
     });
@@ -192,12 +178,13 @@ export default function ChipsDuel() {
     });
   }, []);
 
+  // Меню
   if (G.phase === "menu") {
     return (
-      <div className="fixed inset-0 bg-background z-50 flex flex-col items-center justify-center gap-6 px-8">
+      <div className="fixed inset-0 bg-background z-50 flex flex-col items-center justify-center gap-5 px-8">
         <div className="text-6xl">🥔</div>
         <h1 className="text-lg text-primary text-center leading-relaxed">CHIPS<br />DUEL</h1>
-        <p className="text-[9px] text-muted-foreground max-w-[260px] text-center leading-[2]">
+        <p className="text-[8px] text-muted-foreground max-w-[240px] text-center leading-[2]">
           Отметь 3 бомбы на доске соперника. Потом по очереди кликай — не подорвись!
         </p>
         <button onClick={start} className="bg-primary text-primary-foreground px-8 py-3 text-[10px] font-[inherit] rounded-lg shadow-[0_4px_0_hsl(var(--board-border))] active:shadow-none active:translate-y-1 transition-all">
@@ -207,9 +194,10 @@ export default function ChipsDuel() {
     );
   }
 
+  // Результат
   if (G.phase === "result") {
     return (
-      <div className="fixed inset-0 bg-background z-50 flex flex-col items-center justify-center gap-6 px-8">
+      <div className="fixed inset-0 bg-background/90 backdrop-blur z-50 flex flex-col items-center justify-center gap-5 px-8">
         <div className="text-6xl">{G.winner === 1 ? "👱‍♀️" : "🧔"}</div>
         <h1 className="text-lg text-primary text-center leading-relaxed">Игрок {G.winner}<br />победил!</h1>
         <button onClick={start} className="bg-primary text-primary-foreground px-8 py-3 text-[10px] font-[inherit] rounded-lg shadow-[0_4px_0_hsl(var(--board-border))] active:shadow-none active:translate-y-1 transition-all">
@@ -226,46 +214,52 @@ export default function ChipsDuel() {
   const p2Turn = G.phase === "playing" && G.cur === 2;
 
   return (
-    <div className="w-screen h-[100dvh] flex flex-col overflow-hidden bg-background">
-      {/* Видео игрока 1 — фронтальная камера */}
-      <VideoZone id="v1" facingMode="user">
-        <div className="absolute bottom-1 left-2 flex items-center gap-1.5 bg-background/70 px-2 py-0.5 rounded text-[8px]">
+    <div className="w-screen h-[100dvh] flex flex-col overflow-hidden relative">
+      {/* Видео игрока 1 — верхняя половина */}
+      <div className="h-1/2 w-full relative">
+        <VideoZone id="v1" facingMode="user" />
+        {/* Оверлей P1 */}
+        <div className="absolute bottom-2 left-2 flex items-center gap-1.5 bg-background/60 backdrop-blur-sm px-2 py-1 rounded-md text-[8px]">
           <span>P1</span><Hearts count={G.lives[0]} />
         </div>
-        {p1Turn && <div className="absolute top-1 right-2 text-[8px] text-accent animate-pulse-turn">◀ ХОД</div>}
-        {isP1S && <div className="absolute top-1 right-2 text-[8px] text-accent animate-pulse-turn">СТАВИТ 💣</div>}
-      </VideoZone>
+        {p1Turn && <div className="absolute top-2 right-2 text-[8px] text-accent animate-pulse-turn bg-background/50 px-2 py-0.5 rounded">◀ ХОД</div>}
+        {isP1S && <div className="absolute top-2 right-2 text-[8px] text-accent animate-pulse-turn bg-background/50 px-2 py-0.5 rounded">СТАВИТ 💣</div>}
+      </div>
 
-      {/* Центр — две доски */}
-      <div className="flex-1 flex flex-col items-center justify-center gap-2 px-2 min-h-0">
+      {/* Видео игрока 2 — нижняя половина */}
+      <div className="h-1/2 w-full relative">
+        <VideoZone id="v2" facingMode="environment" />
+        {/* Оверлей P2 */}
+        <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-background/60 backdrop-blur-sm px-2 py-1 rounded-md text-[8px]">
+          <span>P2</span><Hearts count={G.lives[1]} />
+        </div>
+        {p2Turn && <div className="absolute bottom-2 right-2 text-[8px] text-accent animate-pulse-turn bg-background/50 px-2 py-0.5 rounded">◀ ХОД</div>}
+        {!isP1S && isSetup && <div className="absolute bottom-2 right-2 text-[8px] text-accent animate-pulse-turn bg-background/50 px-2 py-0.5 rounded">СТАВИТ 💣</div>}
+      </div>
+
+      {/* Доски поверх видео — по центру экрана */}
+      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10">
         {isSetup && (
-          <div className="text-[8px] text-primary text-center">
+          <div className="text-[8px] text-foreground text-center mb-1 bg-background/60 backdrop-blur-sm px-3 py-1 rounded-md pointer-events-auto">
             Игрок {isP1S ? 1 : 2}: отметь бомбы ({cnt}/{BOMBS})
           </div>
         )}
-        <div className="flex items-center justify-center gap-3">
+        <div className="flex items-center justify-center gap-2 pointer-events-auto">
           <BoardGrid board={G.p1Board} owner={1} G={G} onSetupClick={setupClick} onPlayClick={playClick} />
-          <span className="text-[7px] text-muted-foreground">VS</span>
+          <span className="text-[7px] text-foreground/60 bg-background/40 px-1 py-0.5 rounded">VS</span>
           <BoardGrid board={G.p2Board} owner={2} G={G} onSetupClick={setupClick} onPlayClick={playClick} />
         </div>
         {isSetup && cnt === BOMBS && (
-          <button onClick={confirm} className="bg-primary text-primary-foreground px-6 py-2 text-[8px] font-[inherit] rounded-lg shadow-[0_4px_0_hsl(var(--board-border))] active:shadow-none active:translate-y-1 transition-all">
+          <button onClick={confirm} className="bg-primary text-primary-foreground px-5 py-2 text-[8px] font-[inherit] rounded-lg shadow-[0_3px_0_hsl(var(--board-border))] active:shadow-none active:translate-y-1 transition-all mt-2 pointer-events-auto">
             ГОТОВО ✓
           </button>
         )}
         {G.phase === "playing" && (
-          <div className="text-[8px] text-accent">Ход Игрока {G.cur}</div>
+          <div className="text-[8px] text-foreground mt-1 bg-background/60 backdrop-blur-sm px-3 py-1 rounded-md">
+            Ход Игрока {G.cur}
+          </div>
         )}
       </div>
-
-      {/* Видео игрока 2 — задняя камера */}
-      <VideoZone id="v2" facingMode="environment">
-        <div className="absolute top-1 left-2 flex items-center gap-1.5 bg-background/70 px-2 py-0.5 rounded text-[8px]">
-          <span>P2</span><Hearts count={G.lives[1]} />
-        </div>
-        {p2Turn && <div className="absolute bottom-1 right-2 text-[8px] text-accent animate-pulse-turn">◀ ХОД</div>}
-        {!isP1S && isSetup && <div className="absolute bottom-1 right-2 text-[8px] text-accent animate-pulse-turn">СТАВИТ 💣</div>}
-      </VideoZone>
     </div>
   );
 }
