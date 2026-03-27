@@ -41,17 +41,23 @@ function Hearts({ count }: { count: number }) {
   );
 }
 
-function Cell({ state, dimmed, onClick }: { state: CellState; dimmed: boolean; onClick?: () => void }) {
+function Cell({ state, dimmed, onClick, owner }: { state: CellState; dimmed: boolean; onClick?: () => void; owner: 1 | 2 }) {
   const base = "w-9 h-9 flex items-center justify-center rounded-sm border transition-all duration-150";
-  let bg: string;
+  // Цвет ячейки всегда зависит только от владельца доски — никогда не меняется
+  const ownerBg = owner === 1
+    ? "bg-[hsl(45,80%,55%)] border-[hsl(45,80%,40%)]"
+    : "bg-[hsl(145,40%,40%)] border-[hsl(145,40%,30%)]";
+  const dimBg = owner === 1
+    ? "bg-[hsl(45,40%,35%)] border-[hsl(45,40%,25%)]"
+    : "bg-[hsl(145,20%,25%)] border-[hsl(145,20%,18%)]";
+  const bg = dimmed ? dimBg : ownerBg;
+
   let content: React.ReactNode = <span className="text-base">🥔</span>;
   const clickable = !!onClick;
 
-  if (state === "marked") { bg = "bg-destructive border-destructive/60"; content = <span className="text-base">☠️</span>; }
-  else if (state === "revealed-safe") { bg = "bg-[hsl(var(--cell-safe))] border-[hsl(var(--cell-safe-border))]"; content = null; }
-  else if (state === "revealed-bomb") { bg = "bg-[hsl(var(--cell-bomb))] border-[hsl(var(--cell-bomb-border))]"; content = <span className="text-base">💣</span>; }
-  else if (dimmed) { bg = "bg-[hsl(var(--cell-dim))] border-[hsl(var(--cell-dim-border))]"; }
-  else { bg = "bg-primary border-primary/60 shadow-[inset_-1px_-1px_0] shadow-primary/30"; }
+  if (state === "marked") { content = <span className="text-base">☠️</span>; }
+  else if (state === "revealed-safe") { content = null; }
+  else if (state === "revealed-bomb") { content = <span className="text-base">💣</span>; }
 
   return (
     <div
@@ -92,7 +98,7 @@ function BoardGrid({ board, owner, G, onSetupClick, onPlayClick }: {
           }
           if (c !== "hidden" && c !== "marked") { click = undefined; dimmed = false; }
 
-          return <Cell key={i} state={c} dimmed={dimmed} onClick={click} />;
+          return <Cell key={i} state={c} dimmed={dimmed} onClick={click} owner={owner} />;
         })}
       </div>
     </div>
