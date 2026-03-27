@@ -29,7 +29,7 @@ const freshState = (): GameState => ({
   winner: null,
 });
 
-const EMOJI = { hidden: "🥟", safe: "😋", bomb: "💣", mark: "💀" };
+const EMOJI = { hidden: "🫓", safe: "😋", bomb: "💣", mark: "☠️" };
 
 function Hearts({ count }: { count: number }) {
   return (
@@ -77,17 +77,19 @@ function BoardGrid({ board, owner, G, onSetupClick, onPlayClick }: {
         {board.map((c, i) => {
           let dimmed = false;
           let click: (() => void) | undefined;
+          // Во время игры скрываем метки от игроков — показываем как обычные ячейки
+          const displayState = (G.phase === "playing" && c === "marked") ? "hidden" : c;
 
           if (isSetup && c === "hidden") {
             if ((isP1S && owner === 2) || (!isP1S && owner === 1)) click = () => onSetupClick(i);
             else dimmed = true;
-          } else if (G.phase === "playing" && c === "hidden") {
+          } else if (G.phase === "playing" && (c === "hidden" || c === "marked")) {
             if ((G.cur === 1 && owner === 2) || (G.cur === 2 && owner === 1)) click = () => onPlayClick(owner, i);
             else dimmed = true;
           }
-          if (c !== "hidden") { click = undefined; dimmed = false; }
+          if (displayState !== "hidden") { click = undefined; dimmed = false; }
 
-          return <Cell key={i} state={c} dimmed={dimmed} onClick={click} />;
+          return <Cell key={i} state={displayState} dimmed={dimmed} onClick={click} />;
         })}
       </div>
     </div>
@@ -137,16 +139,14 @@ export default function ChipsDuel() {
       if (isP1S) {
         if (g.p1Bombs.includes(i)) { g.p1Bombs = g.p1Bombs.filter(x => x !== i); g.p2Board[i] = "hidden"; }
         else if (g.p1Bombs.length < BOMBS) { g.p1Bombs.push(i); g.p2Board[i] = "marked"; }
-        // Автопереход когда 3 бомбы
+        // Автопереход когда 3 бомбы — метки остаются видны зрителю
         if (g.p1Bombs.length === BOMBS) {
-          g.p2Board = g.p2Board.map(c => c === "marked" ? "hidden" : c);
           g.phase = "p2-setup";
         }
       } else {
         if (g.p2Bombs.includes(i)) { g.p2Bombs = g.p2Bombs.filter(x => x !== i); g.p1Board[i] = "hidden"; }
         else if (g.p2Bombs.length < BOMBS) { g.p2Bombs.push(i); g.p1Board[i] = "marked"; }
         if (g.p2Bombs.length === BOMBS) {
-          g.p1Board = g.p1Board.map(c => c === "marked" ? "hidden" : c);
           g.phase = "playing"; g.cur = 1;
         }
       }
@@ -173,7 +173,7 @@ export default function ChipsDuel() {
       if (g.cur === 1 && owner !== 2) return prev;
       if (g.cur === 2 && owner !== 1) return prev;
       const board = owner === 1 ? g.p1Board : g.p2Board;
-      if (board[i] !== "hidden") return prev;
+      if (board[i] !== "hidden" && board[i] !== "marked") return prev;
       const bombs = g.cur === 1 ? g.p1Bombs : g.p2Bombs;
       const hit = bombs.includes(i);
       board[i] = hit ? "revealed-bomb" : "revealed-safe";
