@@ -44,6 +44,14 @@ export function useOnlineGame(): OnlineGameReturn {
   const listenersRef = useRef<Set<MoveListener>>(new Set());
   const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const mountedRef = useRef(true);
+  const joinRetryRef = useRef<number | null>(null);
+
+  const clearJoinRetry = useCallback(() => {
+    if (joinRetryRef.current !== null) {
+      window.clearInterval(joinRetryRef.current);
+      joinRetryRef.current = null;
+    }
+  }, []);
 
   const getLocalStream = useCallback(async () => {
     try {
@@ -156,6 +164,7 @@ export function useOnlineGame(): OnlineGameReturn {
       }
 
       if (msg.type === "join") {
+        if (pc.signalingState !== "stable") return;
         pc.onicecandidate = (e) => {
           if (e.candidate) {
             channel.send({
@@ -166,13 +175,15 @@ export function useOnlineGame(): OnlineGameReturn {
           }
         };
 
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        channel.send({
-          type: "broadcast",
-          event: "signal",
-          payload: { type: "offer", sdp: { type: offer.type, sdp: offer.sdp } },
-        });
+        try {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          channel.send({
+            type: "broadcast",
+            event: "signal",
+            payload: { type: "offer", sdp: { type: offer.type, sdp: offer.sdp } },
+          });
+        } catch {}
       }
     });
 
@@ -254,10 +265,11 @@ export function useOnlineGame(): OnlineGameReturn {
         channel.send({ type: "broadcast", event: "signal", payload: { type: "join" } });
 
         let retries = 0;
-        const retryId = window.setInterval(() => {
+        clearJoinRetry();
+        joinRetryRef.current = window.setInterval(() => {
           retries++;
           if (!mounted || pc.remoteDescription || retries > 6) {
-            window.clearInterval(retryId);
+            clearJoinRetry();
             if (mounted) setJoining(false);
             return;
           }
@@ -270,6 +282,7 @@ export function useOnlineGame(): OnlineGameReturn {
 
     return () => {
       mounted = false;
+      clearJoinRetry();
       pendingIceCandidatesRef.current = [];
       pcRef.current?.close();
       if (channelRef.current) {
@@ -277,7 +290,7 @@ export function useOnlineGame(): OnlineGameReturn {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [clearJoinRetry, getLocalStream, setupPeerConnection]);
 
   return {
     role,
