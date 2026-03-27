@@ -173,7 +173,7 @@ export default function ChipsDuel() {
       if (g.cur === 1 && owner !== 2) return prev;
       if (g.cur === 2 && owner !== 1) return prev;
       const board = owner === 1 ? g.p1Board : g.p2Board;
-      if (board[i] !== "hidden") return prev;
+      if (board[i] !== "hidden" && board[i] !== "marked") return prev;
       const bombs = g.cur === 1 ? g.p1Bombs : g.p2Bombs;
       const hit = bombs.includes(i);
       board[i] = hit ? "revealed-bomb" : "revealed-safe";
