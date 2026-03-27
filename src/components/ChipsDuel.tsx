@@ -214,48 +214,48 @@ export default function ChipsDuel() {
   const p2Turn = G.phase === "playing" && G.cur === 2;
 
   return (
-    <div className="w-screen h-[100dvh] flex flex-col overflow-hidden relative">
-      {/* Видео игрока 1 — верхняя половина */}
-      <div className="h-1/2 w-full relative">
-        <VideoZone id="v1" facingMode="user" />
-        {/* Оверлей P1 */}
-        <div className="absolute bottom-2 left-2 flex items-center gap-1.5 bg-background/60 backdrop-blur-sm px-2 py-1 rounded-md text-[8px]">
-          <span>P1</span><Hearts count={G.lives[0]} />
+    <div className="w-screen h-[100dvh] flex flex-col overflow-hidden">
+      {/* Верх: два игрока рядом */}
+      <div className="flex-1 flex min-h-0">
+        {/* Игрок 1 — левая половина */}
+        <div className="w-1/2 h-full relative">
+          <VideoZone id="v1" facingMode="user" />
+          <div className="absolute top-2 left-1/2 -translate-x-1/2">
+            <Hearts count={G.lives[0]} />
+          </div>
+          {p1Turn && <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[8px] text-accent animate-pulse-turn bg-background/50 px-2 py-0.5 rounded">◀ ХОД</div>}
+          {isP1S && <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[8px] text-accent animate-pulse-turn bg-background/50 px-2 py-0.5 rounded">СТАВИТ 💣</div>}
         </div>
-        {p1Turn && <div className="absolute top-2 right-2 text-[8px] text-accent animate-pulse-turn bg-background/50 px-2 py-0.5 rounded">◀ ХОД</div>}
-        {isP1S && <div className="absolute top-2 right-2 text-[8px] text-accent animate-pulse-turn bg-background/50 px-2 py-0.5 rounded">СТАВИТ 💣</div>}
+        {/* Игрок 2 — правая половина */}
+        <div className="w-1/2 h-full relative">
+          <VideoZone id="v2" facingMode="environment" />
+          <div className="absolute top-2 left-1/2 -translate-x-1/2">
+            <Hearts count={G.lives[1]} />
+          </div>
+          {p2Turn && <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[8px] text-accent animate-pulse-turn bg-background/50 px-2 py-0.5 rounded">◀ ХОД</div>}
+          {!isP1S && isSetup && <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[8px] text-accent animate-pulse-turn bg-background/50 px-2 py-0.5 rounded">СТАВИТ 💣</div>}
+        </div>
       </div>
 
-      {/* Видео игрока 2 — нижняя половина */}
-      <div className="h-1/2 w-full relative">
-        <VideoZone id="v2" facingMode="environment" />
-        {/* Оверлей P2 */}
-        <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-background/60 backdrop-blur-sm px-2 py-1 rounded-md text-[8px]">
-          <span>P2</span><Hearts count={G.lives[1]} />
-        </div>
-        {p2Turn && <div className="absolute bottom-2 right-2 text-[8px] text-accent animate-pulse-turn bg-background/50 px-2 py-0.5 rounded">◀ ХОД</div>}
-        {!isP1S && isSetup && <div className="absolute bottom-2 right-2 text-[8px] text-accent animate-pulse-turn bg-background/50 px-2 py-0.5 rounded">СТАВИТ 💣</div>}
-      </div>
-
-      {/* Доски поверх видео — по центру экрана */}
-      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10">
+      {/* Низ: игровые доски */}
+      <div className="flex flex-col items-center justify-center gap-1 py-3 bg-background/80 backdrop-blur-sm">
         {isSetup && (
-          <div className="text-[8px] text-foreground text-center mb-1 bg-background/60 backdrop-blur-sm px-3 py-1 rounded-md pointer-events-auto">
+          <div className="text-[8px] text-foreground text-center bg-background/60 backdrop-blur-sm px-3 py-1 rounded-md">
             Игрок {isP1S ? 1 : 2}: отметь бомбы ({cnt}/{BOMBS})
           </div>
         )}
-        <div className="flex items-center justify-center gap-2 pointer-events-auto">
+        <div className="flex items-center justify-center gap-2">
           <BoardGrid board={G.p1Board} owner={1} G={G} onSetupClick={setupClick} onPlayClick={playClick} />
           <span className="text-[7px] text-foreground/60 bg-background/40 px-1 py-0.5 rounded">VS</span>
           <BoardGrid board={G.p2Board} owner={2} G={G} onSetupClick={setupClick} onPlayClick={playClick} />
         </div>
         {isSetup && cnt === BOMBS && (
-          <button onClick={confirm} className="bg-primary text-primary-foreground px-5 py-2 text-[8px] font-[inherit] rounded-lg shadow-[0_3px_0_hsl(var(--board-border))] active:shadow-none active:translate-y-1 transition-all mt-2 pointer-events-auto">
+          <button onClick={confirm} className="bg-primary text-primary-foreground px-5 py-2 text-[8px] font-[inherit] rounded-lg shadow-[0_3px_0_hsl(var(--board-border))] active:shadow-none active:translate-y-1 transition-all">
             ГОТОВО ✓
           </button>
         )}
         {G.phase === "playing" && (
-          <div className="text-[8px] text-foreground mt-1 bg-background/60 backdrop-blur-sm px-3 py-1 rounded-md">
+          <div className="text-[8px] text-foreground bg-background/60 backdrop-blur-sm px-3 py-1 rounded-md">
             Ход Игрока {G.cur}
           </div>
         )}
