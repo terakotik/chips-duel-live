@@ -29,7 +29,7 @@ const freshState = (): GameState => ({
   winner: null,
 });
 
-const EMOJI = { hidden: "🥟", safe: "😋", bomb: "💣", mark: "💀" };
+const EMOJI = { hidden: "🫓", safe: "😋", bomb: "💣", mark: "☠️" };
 
 function Hearts({ count }: { count: number }) {
   return (
@@ -137,16 +137,14 @@ export default function ChipsDuel() {
       if (isP1S) {
         if (g.p1Bombs.includes(i)) { g.p1Bombs = g.p1Bombs.filter(x => x !== i); g.p2Board[i] = "hidden"; }
         else if (g.p1Bombs.length < BOMBS) { g.p1Bombs.push(i); g.p2Board[i] = "marked"; }
-        // Автопереход когда 3 бомбы
+        // Автопереход когда 3 бомбы — метки остаются видны зрителю
         if (g.p1Bombs.length === BOMBS) {
-          g.p2Board = g.p2Board.map(c => c === "marked" ? "hidden" : c);
           g.phase = "p2-setup";
         }
       } else {
         if (g.p2Bombs.includes(i)) { g.p2Bombs = g.p2Bombs.filter(x => x !== i); g.p1Board[i] = "hidden"; }
         else if (g.p2Bombs.length < BOMBS) { g.p2Bombs.push(i); g.p1Board[i] = "marked"; }
         if (g.p2Bombs.length === BOMBS) {
-          g.p1Board = g.p1Board.map(c => c === "marked" ? "hidden" : c);
           g.phase = "playing"; g.cur = 1;
         }
       }
