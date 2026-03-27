@@ -260,6 +260,9 @@ export default function ChipsDuel() {
       </div>
 
       <div className="flex flex-col items-center justify-center gap-1 py-3 bg-background/80 backdrop-blur-sm">
+        <div className="text-[7px] text-accent text-center bg-secondary/80 px-3 py-1 rounded-full max-w-[300px]">
+          {online.statusText}
+        </div>
         {isSetup && (
           <div className="text-[8px] text-foreground text-center bg-background/60 backdrop-blur-sm px-3 py-1 rounded-md">
             {isMyTurn
