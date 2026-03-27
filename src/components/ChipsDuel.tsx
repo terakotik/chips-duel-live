@@ -117,8 +117,7 @@ function VideoZone({ id, facingMode }: { id: string; facingMode: string }) {
   }, [facingMode]);
 
   return (
-    <div ref={ref} id={id} className="w-full h-full bg-secondary flex items-center justify-center text-3xl">
-      {id === "v1" ? "👱‍♀️" : "🧔"}
+    <div ref={ref} id={id} className="w-full h-full bg-secondary">
     </div>
   );
 }
@@ -216,7 +215,7 @@ export default function ChipsDuel() {
   return (
     <div className="w-screen h-[100dvh] flex flex-col overflow-hidden">
       {/* Верх: два игрока рядом */}
-      <div className="flex-1 flex min-h-0">
+      <div className="flex-1 flex min-h-0 gap-0">
         {/* Игрок 1 — левая половина */}
         <div className="w-1/2 h-full relative">
           <VideoZone id="v1" facingMode="user" />
