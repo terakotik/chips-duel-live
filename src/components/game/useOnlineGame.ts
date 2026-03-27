@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { GameState } from "./types";
-import { freshState, BOMBS, CELLS } from "./types";
+import { freshState } from "./types";
 
 type Role = "host" | "guest";
+type MoveListener = (action: string, payload: any) => void;
 
 interface OnlineGameReturn {
   role: Role | null;
@@ -11,8 +12,8 @@ interface OnlineGameReturn {
   connected: boolean;
   remoteStream: MediaStream | null;
   localStream: MediaStream | null;
-  gameState: GameState;
   sendMove: (action: string, payload: any) => void;
+  onMove: ((listener: MoveListener) => () => void) | null;
   createRoom: () => void;
   joining: boolean;
 }
@@ -34,15 +35,14 @@ export function useOnlineGame(): OnlineGameReturn {
   const [connected, setConnected] = useState(false);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [gameState, setGameState] = useState<GameState>(freshState());
   const [joining, setJoining] = useState(false);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const channelRef = useRef<any>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const roleRef = useRef<Role | null>(null);
+  const listenersRef = useRef<Set<MoveListener>>(new Set());
 
-  // Get local camera
   const getLocalStream = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -56,59 +56,65 @@ export function useOnlineGame(): OnlineGameReturn {
     }
   }, []);
 
-  const setupPeerConnection = useCallback((stream: MediaStream | null) => {
-    const pc = new RTCPeerConnection(ICE_SERVERS);
-    pcRef.current = pc;
-
-    if (stream) {
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-    }
-
-    pc.ontrack = (event) => {
-      setRemoteStream(event.streams[0]);
-    };
-
-    pc.oniceconnectionstatechange = () => {
-      if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") {
-        setConnected(true);
-      }
-      if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") {
-        setConnected(false);
-      }
-    };
-
-    // Data channel for game state
-    if (roleRef.current === "host") {
-      const dc = pc.createDataChannel("game");
-      dc.onopen = () => setConnected(true);
-      dc.onmessage = (e) => handleDataMessage(e.data);
-      dataChannelRef.current = dc;
-    } else {
-      pc.ondatachannel = (e) => {
-        const dc = e.channel;
-        dc.onopen = () => setConnected(true);
-        dc.onmessage = (ev) => handleDataMessage(ev.data);
-        dataChannelRef.current = dc;
-      };
-    }
-
-    return pc;
-  }, []);
-
   const handleDataMessage = useCallback((data: string) => {
     try {
       const msg = JSON.parse(data);
-      if (msg.type === "state") {
-        setGameState(msg.state);
+      if (msg.type === "move") {
+        listenersRef.current.forEach((fn) => fn(msg.action, msg.payload));
       }
     } catch {}
   }, []);
+
+  const setupPeerConnection = useCallback(
+    (stream: MediaStream | null, isHost: boolean) => {
+      const pc = new RTCPeerConnection(ICE_SERVERS);
+      pcRef.current = pc;
+
+      if (stream) {
+        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+      }
+
+      pc.ontrack = (event) => {
+        setRemoteStream(event.streams[0]);
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        const s = pc.iceConnectionState;
+        if (s === "connected" || s === "completed") setConnected(true);
+        if (s === "disconnected" || s === "failed") setConnected(false);
+      };
+
+      if (isHost) {
+        const dc = pc.createDataChannel("game");
+        dc.onopen = () => setConnected(true);
+        dc.onmessage = (e) => handleDataMessage(e.data);
+        dataChannelRef.current = dc;
+      } else {
+        pc.ondatachannel = (e) => {
+          const dc = e.channel;
+          dc.onopen = () => setConnected(true);
+          dc.onmessage = (ev) => handleDataMessage(ev.data);
+          dataChannelRef.current = dc;
+        };
+      }
+
+      return pc;
+    },
+    [handleDataMessage]
+  );
 
   const sendMove = useCallback((action: string, payload: any) => {
     const dc = dataChannelRef.current;
     if (dc && dc.readyState === "open") {
       dc.send(JSON.stringify({ type: "move", action, payload }));
     }
+  }, []);
+
+  const onMove = useCallback((listener: MoveListener) => {
+    listenersRef.current.add(listener);
+    return () => {
+      listenersRef.current.delete(listener);
+    };
   }, []);
 
   const createRoom = useCallback(async () => {
@@ -118,9 +124,8 @@ export function useOnlineGame(): OnlineGameReturn {
     roleRef.current = "host";
 
     const stream = await getLocalStream();
-    const pc = setupPeerConnection(stream);
+    const pc = setupPeerConnection(stream, true);
 
-    // Subscribe to signaling channel
     const channel = supabase.channel(`room-${id}`, {
       config: { broadcast: { self: false } },
     });
@@ -132,14 +137,13 @@ export function useOnlineGame(): OnlineGameReturn {
         await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
       }
 
-      if (msg.type === "ice-candidate" && msg.candidate) {
+      if (msg.type === "ice-candidate" && msg.candidate && msg.from !== "host") {
         try {
           await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
         } catch {}
       }
 
       if (msg.type === "join") {
-        // Guest joined, create offer
         pc.onicecandidate = (e) => {
           if (e.candidate) {
             channel.send({
@@ -164,69 +168,74 @@ export function useOnlineGame(): OnlineGameReturn {
     channelRef.current = channel;
   }, [getLocalStream, setupPeerConnection]);
 
-  // Check URL for room param on mount
+  // Auto-join if URL has ?room=
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const room = params.get("room");
-    if (room) {
-      setRoomId(room);
-      setRole("guest");
-      roleRef.current = "guest";
-      setJoining(true);
+    if (!room) return;
 
-      (async () => {
-        const stream = await getLocalStream();
-        const pc = setupPeerConnection(stream);
+    setRoomId(room);
+    setRole("guest");
+    roleRef.current = "guest";
+    setJoining(true);
 
-        const channel = supabase.channel(`room-${room}`, {
-          config: { broadcast: { self: false } },
-        });
+    let mounted = true;
 
-        channel.on("broadcast", { event: "signal" }, async ({ payload }: any) => {
-          const msg = payload;
+    (async () => {
+      const stream = await getLocalStream();
+      if (!mounted) return;
+      const pc = setupPeerConnection(stream, false);
 
-          if (msg.type === "offer") {
-            await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-            pc.onicecandidate = (e) => {
-              if (e.candidate) {
-                channel.send({
-                  type: "broadcast",
-                  event: "signal",
-                  payload: { type: "ice-candidate", candidate: e.candidate.toJSON(), from: "guest" },
-                });
-              }
-            };
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            channel.send({
-              type: "broadcast",
-              event: "signal",
-              payload: { type: "answer", sdp: { type: answer.type, sdp: answer.sdp } },
-            });
-          }
+      const channel = supabase.channel(`room-${room}`, {
+        config: { broadcast: { self: false } },
+      });
 
-          if (msg.type === "ice-candidate" && msg.candidate) {
-            try {
-              await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
-            } catch {}
-          }
-        });
+      channel.on("broadcast", { event: "signal" }, async ({ payload }: any) => {
+        const msg = payload;
 
-        await channel.subscribe();
-        channelRef.current = channel;
+        if (msg.type === "offer") {
+          await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+          pc.onicecandidate = (e) => {
+            if (e.candidate) {
+              channel.send({
+                type: "broadcast",
+                event: "signal",
+                payload: { type: "ice-candidate", candidate: e.candidate.toJSON(), from: "guest" },
+              });
+            }
+          };
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          channel.send({
+            type: "broadcast",
+            event: "signal",
+            payload: { type: "answer", sdp: { type: answer.type, sdp: answer.sdp } },
+          });
+        }
 
-        // Tell host we joined
+        if (msg.type === "ice-candidate" && msg.candidate && msg.from !== "guest") {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+          } catch {}
+        }
+      });
+
+      await channel.subscribe();
+      channelRef.current = channel;
+
+      // Notify host
+      setTimeout(() => {
         channel.send({
           type: "broadcast",
           event: "signal",
           payload: { type: "join" },
         });
-
         setJoining(false);
-      })();
-    }
+      }, 500);
+    })();
 
     return () => {
+      mounted = false;
       pcRef.current?.close();
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
@@ -240,8 +249,8 @@ export function useOnlineGame(): OnlineGameReturn {
     connected,
     remoteStream,
     localStream,
-    gameState,
     sendMove,
+    onMove,
     createRoom,
     joining,
   };
