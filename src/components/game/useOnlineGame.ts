@@ -42,6 +42,7 @@ export function useOnlineGame(): OnlineGameReturn {
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const roleRef = useRef<Role | null>(null);
   const listenersRef = useRef<Set<MoveListener>>(new Set());
+  const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
 
   const getLocalStream = useCallback(async () => {
     try {
@@ -64,6 +65,51 @@ export function useOnlineGame(): OnlineGameReturn {
       }
     } catch {}
   }, []);
+
+  const waitForChannelSubscription = useCallback((channel: any) => {
+    return new Promise<void>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        reject(new Error("Channel subscription timed out"));
+      }, 10000);
+
+      channel.subscribe((status: string) => {
+        if (status === "SUBSCRIBED") {
+          window.clearTimeout(timeout);
+          resolve();
+        }
+
+        if (status === "TIMED_OUT" || status === "CHANNEL_ERROR" || status === "CLOSED") {
+          window.clearTimeout(timeout);
+          reject(new Error(`Channel subscription failed: ${status}`));
+        }
+      });
+    });
+  }, []);
+
+  const flushPendingIceCandidates = useCallback(async (pc: RTCPeerConnection) => {
+    const queued = [...pendingIceCandidatesRef.current];
+    pendingIceCandidatesRef.current = [];
+
+    for (const candidate of queued) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch {}
+    }
+  }, []);
+
+  const addOrQueueIceCandidate = useCallback(
+    async (pc: RTCPeerConnection, candidate: RTCIceCandidateInit) => {
+      if (!pc.remoteDescription) {
+        pendingIceCandidatesRef.current.push(candidate);
+        return;
+      }
+
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch {}
+    },
+    []
+  );
 
   const setupPeerConnection = useCallback(
     (stream: MediaStream | null, isHost: boolean) => {
@@ -122,6 +168,7 @@ export function useOnlineGame(): OnlineGameReturn {
     setRoomId(id);
     setRole("host");
     roleRef.current = "host";
+    pendingIceCandidatesRef.current = [];
 
     const stream = await getLocalStream();
     const pc = setupPeerConnection(stream, true);
@@ -135,12 +182,11 @@ export function useOnlineGame(): OnlineGameReturn {
 
       if (msg.type === "answer" && pc.signalingState === "have-local-offer") {
         await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+        await flushPendingIceCandidates(pc);
       }
 
       if (msg.type === "ice-candidate" && msg.candidate && msg.from !== "host") {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
-        } catch {}
+        await addOrQueueIceCandidate(pc, msg.candidate);
       }
 
       if (msg.type === "join") {
@@ -164,9 +210,9 @@ export function useOnlineGame(): OnlineGameReturn {
       }
     });
 
-    await channel.subscribe();
+    await waitForChannelSubscription(channel);
     channelRef.current = channel;
-  }, [getLocalStream, setupPeerConnection]);
+  }, [addOrQueueIceCandidate, flushPendingIceCandidates, getLocalStream, setupPeerConnection, waitForChannelSubscription]);
 
   // Auto-join if URL has ?room=
   useEffect(() => {
@@ -178,6 +224,7 @@ export function useOnlineGame(): OnlineGameReturn {
     setRole("guest");
     roleRef.current = "guest";
     setJoining(true);
+    pendingIceCandidatesRef.current = [];
 
     let mounted = true;
 
@@ -195,6 +242,7 @@ export function useOnlineGame(): OnlineGameReturn {
 
         if (msg.type === "offer") {
           await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+          await flushPendingIceCandidates(pc);
           pc.onicecandidate = (e) => {
             if (e.candidate) {
               channel.send({
@@ -214,34 +262,47 @@ export function useOnlineGame(): OnlineGameReturn {
         }
 
         if (msg.type === "ice-candidate" && msg.candidate && msg.from !== "guest") {
-          try {
-            await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
-          } catch {}
+          await addOrQueueIceCandidate(pc, msg.candidate);
         }
       });
 
-      await channel.subscribe();
+      await waitForChannelSubscription(channel);
       channelRef.current = channel;
 
-      // Notify host
-      setTimeout(() => {
+      const sendJoin = () => {
         channel.send({
           type: "broadcast",
           event: "signal",
           payload: { type: "join" },
         });
+      };
+
+      sendJoin();
+
+      const retryJoinId = window.setInterval(() => {
+        if (pc.remoteDescription || pc.connectionState === "connected") {
+          window.clearInterval(retryJoinId);
+          return;
+        }
+
+        sendJoin();
+      }, 1500);
+
+      window.setTimeout(() => {
+        window.clearInterval(retryJoinId);
         setJoining(false);
-      }, 500);
+      }, 6000);
     })();
 
     return () => {
       mounted = false;
+      pendingIceCandidatesRef.current = [];
       pcRef.current?.close();
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
       }
     };
-  }, [getLocalStream, setupPeerConnection]);
+  }, [addOrQueueIceCandidate, flushPendingIceCandidates, getLocalStream, setupPeerConnection, waitForChannelSubscription]);
 
   return {
     role,
