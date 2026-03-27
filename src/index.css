@@ -27,15 +27,15 @@
     --ring: 210 80% 55%;
     --radius: 0.5rem;
 
-    /* Board — синий */
-    --board-bg: 215 70% 22%;
-    --board-border: 215 65% 15%;
+    /* Board — зелёный */
+    --board-bg: 145 50% 18%;
+    --board-border: 145 45% 12%;
     --cell-safe: 142 60% 40%;
     --cell-safe-border: 142 50% 30%;
     --cell-bomb: 0 70% 45%;
     --cell-bomb-border: 0 60% 35%;
-    --cell-dim: 215 40% 35%;
-    --cell-dim-border: 215 35% 28%;
+    --cell-dim: 145 30% 30%;
+    --cell-dim-border: 145 25% 22%;
   }
 }
 
