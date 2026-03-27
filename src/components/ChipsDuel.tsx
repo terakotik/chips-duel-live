@@ -77,17 +77,19 @@ function BoardGrid({ board, owner, G, onSetupClick, onPlayClick }: {
         {board.map((c, i) => {
           let dimmed = false;
           let click: (() => void) | undefined;
+          // Во время игры скрываем метки от игроков — показываем как обычные ячейки
+          const displayState = (G.phase === "playing" && c === "marked") ? "hidden" : c;
 
           if (isSetup && c === "hidden") {
             if ((isP1S && owner === 2) || (!isP1S && owner === 1)) click = () => onSetupClick(i);
             else dimmed = true;
-          } else if (G.phase === "playing" && c === "hidden") {
+          } else if (G.phase === "playing" && (c === "hidden" || c === "marked")) {
             if ((G.cur === 1 && owner === 2) || (G.cur === 2 && owner === 1)) click = () => onPlayClick(owner, i);
             else dimmed = true;
           }
-          if (c !== "hidden") { click = undefined; dimmed = false; }
+          if (displayState !== "hidden") { click = undefined; dimmed = false; }
 
-          return <Cell key={i} state={c} dimmed={dimmed} onClick={click} />;
+          return <Cell key={i} state={displayState} dimmed={dimmed} onClick={click} />;
         })}
       </div>
     </div>
