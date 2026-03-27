@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import chipImg from "@/assets/chip.png";
+import ChipSvg from "./ChipSvg";
 const CELLS = 9;
 const BOMBS = 3;
 const LIVES = 3;
@@ -44,7 +44,7 @@ function Hearts({ count }: { count: number }) {
 function Cell({ state, dimmed, onClick }: { state: CellState; dimmed: boolean; onClick?: () => void }) {
   const base = "w-9 h-9 flex items-center justify-center rounded-sm border transition-all duration-150";
   let bg: string;
-  let content: React.ReactNode = <img src={chipImg} alt="chip" className="w-7 h-7 object-contain" />;
+  let content: React.ReactNode = <ChipSvg />;
   let clickable = !!onClick;
 
   if (state === "marked") { bg = "bg-destructive border-destructive/60"; content = <span className="text-base">☠️</span>; clickable = false; }
@@ -77,8 +77,8 @@ function BoardGrid({ board, owner, G, onSetupClick, onPlayClick }: {
         {board.map((c, i) => {
           let dimmed = false;
           let click: (() => void) | undefined;
-          // Во время игры скрываем метки от игроков — показываем как обычные ячейки
-          const displayState = (G.phase === "playing" && c === "marked") ? "hidden" : c;
+          // Метки всегда видны зрителю
+          const displayState = c;
 
           if (isSetup && c === "hidden") {
             if ((isP1S && owner === 2) || (!isP1S && owner === 1)) click = () => onSetupClick(i);
@@ -87,7 +87,7 @@ function BoardGrid({ board, owner, G, onSetupClick, onPlayClick }: {
             if ((G.cur === 1 && owner === 2) || (G.cur === 2 && owner === 1)) click = () => onPlayClick(owner, i);
             else dimmed = true;
           }
-          if (displayState !== "hidden") { click = undefined; dimmed = false; }
+          if (displayState !== "hidden" && displayState !== "marked") { click = undefined; dimmed = false; }
 
           return <Cell key={i} state={displayState} dimmed={dimmed} onClick={click} />;
         })}
