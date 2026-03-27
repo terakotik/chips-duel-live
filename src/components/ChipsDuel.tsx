@@ -184,6 +184,11 @@ export default function ChipsDuel() {
         <h2 className="text-[11px] text-primary text-center">
           {online.joining ? "Подключение..." : "Ожидание соперника"}
         </h2>
+        <div className="bg-secondary/80 px-4 py-2 rounded-lg max-w-[280px]">
+          <p className="text-[8px] text-accent text-center font-mono">
+            {online.statusText}
+          </p>
+        </div>
         {online.role === "host" && (
           <div className="flex flex-col items-center gap-3">
             <p className="text-[8px] text-muted-foreground text-center">
