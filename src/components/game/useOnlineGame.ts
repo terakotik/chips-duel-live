@@ -176,7 +176,11 @@ export function useOnlineGame(): OnlineGameReturn {
       }
     });
 
-    channel.subscribe();
+    channel.subscribe((status) => {
+      if (status === "SUBSCRIBED") {
+        console.log("[host] channel SUBSCRIBED, waiting for guest...");
+      }
+    });
     channelRef.current = channel;
   }, [getLocalStream, setupPeerConnection]);
 
@@ -243,25 +247,25 @@ export function useOnlineGame(): OnlineGameReturn {
         }
       });
 
-      channel.subscribe();
-      channelRef.current = channel;
-
-      // Notify host with retries
-      setTimeout(() => {
+      channel.subscribe((status) => {
+        if (status !== "SUBSCRIBED") return;
         if (!mounted) return;
+        console.log("[guest] channel SUBSCRIBED, sending join...");
         channel.send({ type: "broadcast", event: "signal", payload: { type: "join" } });
 
         let retries = 0;
         const retryId = window.setInterval(() => {
           retries++;
-          if (!mounted || pc.remoteDescription || retries > 4) {
+          if (!mounted || pc.remoteDescription || retries > 6) {
             window.clearInterval(retryId);
             if (mounted) setJoining(false);
             return;
           }
+          console.log("[guest] retrying join signal", retries);
           channel.send({ type: "broadcast", event: "signal", payload: { type: "join" } });
         }, 1500);
-      }, 600);
+      });
+      channelRef.current = channel;
     })();
 
     return () => {
