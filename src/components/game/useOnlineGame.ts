@@ -43,6 +43,7 @@ export function useOnlineGame(): OnlineGameReturn {
   const roleRef = useRef<Role | null>(null);
   const listenersRef = useRef<Set<MoveListener>>(new Set());
   const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  const mountedRef = useRef(true);
 
   const getLocalStream = useCallback(async () => {
     try {
@@ -65,51 +66,6 @@ export function useOnlineGame(): OnlineGameReturn {
       }
     } catch {}
   }, []);
-
-  const waitForChannelSubscription = useCallback((channel: any) => {
-    return new Promise<void>((resolve, reject) => {
-      const timeout = window.setTimeout(() => {
-        reject(new Error("Channel subscription timed out"));
-      }, 10000);
-
-      channel.subscribe((status: string) => {
-        if (status === "SUBSCRIBED") {
-          window.clearTimeout(timeout);
-          resolve();
-        }
-
-        if (status === "TIMED_OUT" || status === "CHANNEL_ERROR" || status === "CLOSED") {
-          window.clearTimeout(timeout);
-          reject(new Error(`Channel subscription failed: ${status}`));
-        }
-      });
-    });
-  }, []);
-
-  const flushPendingIceCandidates = useCallback(async (pc: RTCPeerConnection) => {
-    const queued = [...pendingIceCandidatesRef.current];
-    pendingIceCandidatesRef.current = [];
-
-    for (const candidate of queued) {
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
-      } catch {}
-    }
-  }, []);
-
-  const addOrQueueIceCandidate = useCallback(
-    async (pc: RTCPeerConnection, candidate: RTCIceCandidateInit) => {
-      if (!pc.remoteDescription) {
-        pendingIceCandidatesRef.current.push(candidate);
-        return;
-      }
-
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
-      } catch {}
-    },
-    []
-  );
 
   const setupPeerConnection = useCallback(
     (stream: MediaStream | null, isHost: boolean) => {
@@ -181,12 +137,22 @@ export function useOnlineGame(): OnlineGameReturn {
       const msg = payload;
 
       if (msg.type === "answer" && pc.signalingState === "have-local-offer") {
-        await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-        await flushPendingIceCandidates(pc);
+        try {
+          await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+          const queued = [...pendingIceCandidatesRef.current];
+          pendingIceCandidatesRef.current = [];
+          for (const c of queued) {
+            try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
+          }
+        } catch {}
       }
 
       if (msg.type === "ice-candidate" && msg.candidate && msg.from !== "host") {
-        await addOrQueueIceCandidate(pc, msg.candidate);
+        if (!pc.remoteDescription) {
+          pendingIceCandidatesRef.current.push(msg.candidate);
+        } else {
+          try { await pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); } catch {}
+        }
       }
 
       if (msg.type === "join") {
@@ -210,9 +176,9 @@ export function useOnlineGame(): OnlineGameReturn {
       }
     });
 
-    await waitForChannelSubscription(channel);
+    channel.subscribe();
     channelRef.current = channel;
-  }, [addOrQueueIceCandidate, flushPendingIceCandidates, getLocalStream, setupPeerConnection, waitForChannelSubscription]);
+  }, [getLocalStream, setupPeerConnection]);
 
   // Auto-join if URL has ?room=
   useEffect(() => {
@@ -238,60 +204,64 @@ export function useOnlineGame(): OnlineGameReturn {
       });
 
       channel.on("broadcast", { event: "signal" }, async ({ payload }: any) => {
+        if (!mounted) return;
         const msg = payload;
 
         if (msg.type === "offer") {
-          await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-          await flushPendingIceCandidates(pc);
-          pc.onicecandidate = (e) => {
-            if (e.candidate) {
-              channel.send({
-                type: "broadcast",
-                event: "signal",
-                payload: { type: "ice-candidate", candidate: e.candidate.toJSON(), from: "guest" },
-              });
+          try {
+            await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+            const queued = [...pendingIceCandidatesRef.current];
+            pendingIceCandidatesRef.current = [];
+            for (const c of queued) {
+              try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
             }
-          };
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          channel.send({
-            type: "broadcast",
-            event: "signal",
-            payload: { type: "answer", sdp: { type: answer.type, sdp: answer.sdp } },
-          });
+            pc.onicecandidate = (e) => {
+              if (e.candidate) {
+                channel.send({
+                  type: "broadcast",
+                  event: "signal",
+                  payload: { type: "ice-candidate", candidate: e.candidate.toJSON(), from: "guest" },
+                });
+              }
+            };
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            channel.send({
+              type: "broadcast",
+              event: "signal",
+              payload: { type: "answer", sdp: { type: answer.type, sdp: answer.sdp } },
+            });
+          } catch {}
         }
 
         if (msg.type === "ice-candidate" && msg.candidate && msg.from !== "guest") {
-          await addOrQueueIceCandidate(pc, msg.candidate);
+          if (!pc.remoteDescription) {
+            pendingIceCandidatesRef.current.push(msg.candidate);
+          } else {
+            try { await pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); } catch {}
+          }
         }
       });
 
-      await waitForChannelSubscription(channel);
+      channel.subscribe();
       channelRef.current = channel;
 
-      const sendJoin = () => {
-        channel.send({
-          type: "broadcast",
-          event: "signal",
-          payload: { type: "join" },
-        });
-      };
+      // Notify host with retries
+      setTimeout(() => {
+        if (!mounted) return;
+        channel.send({ type: "broadcast", event: "signal", payload: { type: "join" } });
 
-      sendJoin();
-
-      const retryJoinId = window.setInterval(() => {
-        if (pc.remoteDescription || pc.connectionState === "connected") {
-          window.clearInterval(retryJoinId);
-          return;
-        }
-
-        sendJoin();
-      }, 1500);
-
-      window.setTimeout(() => {
-        window.clearInterval(retryJoinId);
-        setJoining(false);
-      }, 6000);
+        let retries = 0;
+        const retryId = window.setInterval(() => {
+          retries++;
+          if (!mounted || pc.remoteDescription || retries > 4) {
+            window.clearInterval(retryId);
+            if (mounted) setJoining(false);
+            return;
+          }
+          channel.send({ type: "broadcast", event: "signal", payload: { type: "join" } });
+        }, 1500);
+      }, 600);
     })();
 
     return () => {
@@ -302,7 +272,8 @@ export function useOnlineGame(): OnlineGameReturn {
         supabase.removeChannel(channelRef.current);
       }
     };
-  }, [addOrQueueIceCandidate, flushPendingIceCandidates, getLocalStream, setupPeerConnection, waitForChannelSubscription]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return {
     role,
