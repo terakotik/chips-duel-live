@@ -29,7 +29,7 @@ const freshState = (): GameState => ({
   winner: null,
 });
 
-const EMOJI = { hidden: "🥔", safe: "😋", bomb: "💣", mark: "💀" };
+const EMOJI = { hidden: "🥟", safe: "😋", bomb: "💣", mark: "💀" };
 
 function Hearts({ count }: { count: number }) {
   return (
@@ -137,9 +137,18 @@ export default function ChipsDuel() {
       if (isP1S) {
         if (g.p1Bombs.includes(i)) { g.p1Bombs = g.p1Bombs.filter(x => x !== i); g.p2Board[i] = "hidden"; }
         else if (g.p1Bombs.length < BOMBS) { g.p1Bombs.push(i); g.p2Board[i] = "marked"; }
+        // Автопереход когда 3 бомбы
+        if (g.p1Bombs.length === BOMBS) {
+          g.p2Board = g.p2Board.map(c => c === "marked" ? "hidden" : c);
+          g.phase = "p2-setup";
+        }
       } else {
         if (g.p2Bombs.includes(i)) { g.p2Bombs = g.p2Bombs.filter(x => x !== i); g.p1Board[i] = "hidden"; }
         else if (g.p2Bombs.length < BOMBS) { g.p2Bombs.push(i); g.p1Board[i] = "marked"; }
+        if (g.p2Bombs.length === BOMBS) {
+          g.p1Board = g.p1Board.map(c => c === "marked" ? "hidden" : c);
+          g.phase = "playing"; g.cur = 1;
+        }
       }
       return g;
     });
@@ -248,11 +257,6 @@ export default function ChipsDuel() {
           <span className="text-[7px] text-foreground/60 bg-background/40 px-1 py-0.5 rounded">VS</span>
           <BoardGrid board={G.p2Board} owner={2} G={G} onSetupClick={setupClick} onPlayClick={playClick} />
         </div>
-        {isSetup && cnt === BOMBS && (
-          <button onClick={confirm} className="bg-primary text-primary-foreground px-5 py-2 text-[8px] font-[inherit] rounded-lg shadow-[0_3px_0_hsl(var(--board-border))] active:shadow-none active:translate-y-1 transition-all">
-            ГОТОВО ✓
-          </button>
-        )}
         {G.phase === "playing" && (
           <div className="text-[8px] text-foreground bg-background/60 backdrop-blur-sm px-3 py-1 rounded-md">
             Ход Игрока {G.cur}
