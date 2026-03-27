@@ -1,140 +1,53 @@
-import { useState, useRef, useEffect, useCallback } from "react";
-
-const CELLS = 9;
-const BOMBS = 3;
-const LIVES = 3;
-
-type CellState = "hidden" | "marked" | "revealed-safe" | "revealed-bomb";
-type Phase = "menu" | "p1-setup" | "p2-setup" | "playing" | "result";
-
-interface GameState {
-  phase: Phase;
-  p1Board: CellState[];
-  p2Board: CellState[];
-  p1Bombs: number[];
-  p2Bombs: number[];
-  lives: [number, number];
-  cur: 1 | 2;
-  winner: 1 | 2 | null;
-}
-
-const freshState = (): GameState => ({
-  phase: "menu",
-  p1Board: Array(CELLS).fill("hidden"),
-  p2Board: Array(CELLS).fill("hidden"),
-  p1Bombs: [],
-  p2Bombs: [],
-  lives: [LIVES, LIVES],
-  cur: 1,
-  winner: null,
-});
-
-const EMOJI = { hidden: "🫓", safe: "😋", bomb: "💣", mark: "☠️" };
-
-function Hearts({ count }: { count: number }) {
-  return (
-    <div className="flex gap-0.5">
-      {Array.from({ length: LIVES }, (_, i) => (
-        <span key={i} className="text-[10px]" style={{ opacity: i < count ? 1 : 0.2 }}>❤️</span>
-      ))}
-    </div>
-  );
-}
-
-function Cell({ state, onClick, owner }: { state: CellState; dimmed: boolean; onClick?: () => void; owner: 1 | 2 }) {
-  const base = "w-9 h-9 flex items-center justify-center rounded-sm border transition-all duration-150";
-  const ownerBg = owner === 1
-    ? "bg-[hsl(45,80%,55%)] border-[hsl(45,80%,40%)]"
-    : "bg-[hsl(145,40%,40%)] border-[hsl(145,40%,30%)]";
-
-  let content: React.ReactNode = <span className="text-base">🥔</span>;
-  const clickable = !!onClick;
-
-  if (state === "marked") content = <span className="text-base">☠️</span>;
-  else if (state === "revealed-safe") content = null;
-  else if (state === "revealed-bomb") content = <span className="text-base">💣</span>;
-
-  return (
-    <div
-      className={`${base} ${ownerBg} ${clickable ? "cursor-pointer active:scale-90" : "cursor-default"}`}
-      onClick={clickable ? onClick : undefined}
-    >
-      {content}
-    </div>
-  );
-}
-
-function BoardGrid({ board, owner, G, onSetupClick, onPlayClick }: {
-  board: CellState[]; owner: 1 | 2; G: GameState;
-  onSetupClick: (i: number) => void; onPlayClick: (owner: 1 | 2, i: number) => void;
-}) {
-  const isSetup = G.phase === "p1-setup" || G.phase === "p2-setup";
-  const isP1S = G.phase === "p1-setup";
-
-  return (
-    <div className="flex flex-col items-center gap-0.5">
-      <span className="text-[6px] text-foreground/50">P{owner}</span>
-      <div className={`grid grid-cols-3 gap-[3px] p-1 rounded border ${
-        owner === 1
-          ? "bg-[hsl(40,60%,20%)] border-[hsl(40,60%,30%)]"
-          : "bg-[hsl(200,50%,20%)] border-[hsl(200,50%,30%)]"
-      }`}>
-        {board.map((c, i) => {
-          let dimmed = false;
-          let click: (() => void) | undefined;
-          const isPlaying = G.phase === "playing";
-
-          if (isSetup && (c === "hidden" || c === "marked")) {
-            if ((isP1S && owner === 2) || (!isP1S && owner === 1)) click = () => onSetupClick(i);
-            else dimmed = true;
-          } else if (isPlaying && (c === "hidden" || c === "marked")) {
-            if ((G.cur === 1 && owner === 2) || (G.cur === 2 && owner === 1)) click = () => onPlayClick(owner, i);
-            else dimmed = true;
-          }
-          if (c !== "hidden" && c !== "marked") { click = undefined; dimmed = false; }
-
-          return <Cell key={i} state={c} dimmed={dimmed} onClick={click} owner={owner} />;
-        })}
-      </div>
-    </div>
-  );
-}
-
-function VideoZone({ id, facingMode }: { id: string; facingMode: string }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    navigator.mediaDevices?.getUserMedia({ video: { facingMode }, audio: false })
-      .then(s => {
-        streamRef.current = s;
-        const v = document.createElement("video");
-        v.srcObject = s;
-        v.autoplay = true;
-        v.playsInline = true;
-        v.muted = true;
-        v.className = "w-full h-full object-cover";
-        el.appendChild(v);
-      })
-      .catch(() => {});
-    return () => { streamRef.current?.getTracks().forEach(t => t.stop()); };
-  }, [facingMode]);
-
-  return (
-    <div ref={ref} id={id} className="w-full h-full bg-secondary">
-    </div>
-  );
-}
+import { useState, useRef, useCallback, useEffect } from "react";
+import { freshState, BOMBS } from "./game/types";
+import type { GameState } from "./game/types";
+import { BoardGrid } from "./game/BoardGrid";
+import { Hearts } from "./game/Hearts";
+import { VideoZone, type VideoZoneHandle } from "./game/VideoZone";
+import { ResultScreen } from "./game/ResultScreen";
+import { useGameRecorder } from "./game/useGameRecorder";
 
 export default function ChipsDuel() {
   const [G, setG] = useState<GameState>(freshState);
+  const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
+  const v1Ref = useRef<VideoZoneHandle | null>(null);
+  const v2Ref = useRef<VideoZoneHandle | null>(null);
+  const { startRecording, stopRecording, updateGameState } = useGameRecorder(v1Ref, v2Ref);
+  const recordingStarted = useRef(false);
 
-  const start = () => setG({
-    ...freshState(), phase: "p1-setup",
-    p1Board: Array(CELLS).fill("hidden"), p2Board: Array(CELLS).fill("hidden"),
-  });
+  // Start recording on mount
+  useEffect(() => {
+    if (!recordingStarted.current) {
+      recordingStarted.current = true;
+      // Small delay to let cameras initialize
+      const t = setTimeout(() => startRecording(), 1500);
+      return () => clearTimeout(t);
+    }
+  }, [startRecording]);
+
+  // Sync game state to recorder
+  useEffect(() => {
+    updateGameState(G);
+  }, [G, updateGameState]);
+
+  // Stop recording on result
+  useEffect(() => {
+    if (G.phase === "result") {
+      stopRecording().then(blob => {
+        if (blob) setVideoBlob(blob);
+      });
+    }
+  }, [G.phase, stopRecording]);
+
+  const restart = useCallback(() => {
+    setG(freshState());
+    setVideoBlob(null);
+    recordingStarted.current = false;
+    setTimeout(() => {
+      recordingStarted.current = true;
+      startRecording();
+    }, 1500);
+  }, [startRecording]);
 
   const setupClick = useCallback((i: number) => {
     setG(prev => {
@@ -143,22 +56,15 @@ export default function ChipsDuel() {
       if (isP1S) {
         if (g.p1Bombs.includes(i)) { g.p1Bombs = g.p1Bombs.filter(x => x !== i); g.p2Board[i] = "hidden"; }
         else if (g.p1Bombs.length < BOMBS) { g.p1Bombs.push(i); g.p2Board[i] = "marked"; }
-        // Автопереход когда 3 бомбы — метки остаются видны зрителю
-        if (g.p1Bombs.length === BOMBS) {
-          g.phase = "p2-setup";
-        }
+        if (g.p1Bombs.length === BOMBS) g.phase = "p2-setup";
       } else {
         if (g.p2Bombs.includes(i)) { g.p2Bombs = g.p2Bombs.filter(x => x !== i); g.p1Board[i] = "hidden"; }
         else if (g.p2Bombs.length < BOMBS) { g.p2Bombs.push(i); g.p1Board[i] = "marked"; }
-        if (g.p2Bombs.length === BOMBS) {
-          g.phase = "playing"; g.cur = 1;
-        }
+        if (g.p2Bombs.length === BOMBS) { g.phase = "playing"; g.cur = 1; }
       }
       return g;
     });
   }, []);
-
-  // confirm больше не нужен — автопереход в setupClick
 
   const playClick = useCallback((owner: 1 | 2, i: number) => {
     setG(prev => {
@@ -180,33 +86,8 @@ export default function ChipsDuel() {
     });
   }, []);
 
-  // Меню
-  if (G.phase === "menu") {
-    return (
-      <div className="fixed inset-0 bg-background z-50 flex flex-col items-center justify-center gap-5 px-8">
-        <div className="text-6xl">🥔</div>
-        <h1 className="text-lg text-primary text-center leading-relaxed">CHIPS<br />DUEL</h1>
-        <p className="text-[8px] text-muted-foreground max-w-[240px] text-center leading-[2]">
-          Отметь 3 бомбы на доске соперника. Потом по очереди кликай — не подорвись!
-        </p>
-        <button onClick={start} className="bg-primary text-primary-foreground px-8 py-3 text-[10px] font-[inherit] rounded-lg shadow-[0_4px_0_hsl(var(--board-border))] active:shadow-none active:translate-y-1 transition-all">
-          ИГРАТЬ
-        </button>
-      </div>
-    );
-  }
-
-  // Результат
   if (G.phase === "result") {
-    return (
-      <div className="fixed inset-0 bg-background/90 backdrop-blur z-50 flex flex-col items-center justify-center gap-5 px-8">
-        <div className="text-6xl">{G.winner === 1 ? "👱‍♀️" : "🧔"}</div>
-        <h1 className="text-lg text-primary text-center leading-relaxed">Игрок {G.winner}<br />победил!</h1>
-        <button onClick={start} className="bg-primary text-primary-foreground px-8 py-3 text-[10px] font-[inherit] rounded-lg shadow-[0_4px_0_hsl(var(--board-border))] active:shadow-none active:translate-y-1 transition-all">
-          ЗАНОВО
-        </button>
-      </div>
-    );
+    return <ResultScreen winner={G.winner!} videoBlob={videoBlob} onRestart={restart} />;
   }
 
   const isSetup = G.phase === "p1-setup" || G.phase === "p2-setup";
@@ -217,20 +98,17 @@ export default function ChipsDuel() {
 
   return (
     <div className="w-screen h-[100dvh] flex flex-col overflow-hidden">
-      {/* Верх: два игрока рядом */}
       <div className="flex-1 flex min-h-0 gap-0">
-        {/* Игрок 1 — левая половина */}
         <div className="w-1/2 h-full relative">
-          <VideoZone id="v1" facingMode="user" />
+          <VideoZone ref={v1Ref} id="v1" facingMode="user" />
           <div className="absolute top-2 left-1/2 -translate-x-1/2">
             <Hearts count={G.lives[0]} />
           </div>
           {p1Turn && <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[8px] text-accent animate-pulse-turn bg-background/50 px-2 py-0.5 rounded">◀ ХОД</div>}
           {isP1S && <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[8px] text-accent animate-pulse-turn bg-background/50 px-2 py-0.5 rounded">СТАВИТ 💣</div>}
         </div>
-        {/* Игрок 2 — правая половина */}
         <div className="w-1/2 h-full relative">
-          <VideoZone id="v2" facingMode="environment" />
+          <VideoZone ref={v2Ref} id="v2" facingMode="environment" />
           <div className="absolute top-2 left-1/2 -translate-x-1/2">
             <Hearts count={G.lives[1]} />
           </div>
@@ -239,7 +117,6 @@ export default function ChipsDuel() {
         </div>
       </div>
 
-      {/* Низ: игровые доски */}
       <div className="flex flex-col items-center justify-center gap-1 py-3 bg-background/80 backdrop-blur-sm">
         {isSetup && (
           <div className="text-[8px] text-foreground text-center bg-background/60 backdrop-blur-sm px-3 py-1 rounded-md">
