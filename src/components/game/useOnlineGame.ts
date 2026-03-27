@@ -43,6 +43,13 @@ function generateRoomId(): string {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
+function generatePeerId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return Math.random().toString(36).slice(2);
+}
+
 export function useOnlineGame(): OnlineGameReturn {
   const [role, setRole] = useState<Role | null>(null);
   const [roomId, setRoomId] = useState<string | null>(null);
@@ -54,323 +61,394 @@ export function useOnlineGame(): OnlineGameReturn {
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const channelRef = useRef<any>(null);
-  const dataChannelRef = useRef<RTCDataChannel | null>(null);
-  const listenersRef = useRef<Set<MoveListener>>(new Set());
+  const roleRef = useRef<Role | null>(null);
   const mountedRef = useRef(true);
+  const listenersRef = useRef<Set<MoveListener>>(new Set());
+  const sessionIdRef = useRef(generatePeerId());
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const offerSentRef = useRef(false);
+  const remoteDescriptionSetRef = useRef(false);
+  const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
 
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   const setStatus = useCallback((text: string) => {
-    console.log("[status]", text);
-    if (mountedRef.current) setStatusText(text);
+    console.log("[online]", text);
+    if (mountedRef.current) {
+      setStatusText(text);
+    }
   }, []);
 
+  const cleanupPeerConnection = useCallback(() => {
+    pendingIceCandidatesRef.current = [];
+    remoteDescriptionSetRef.current = false;
+    offerSentRef.current = false;
+
+    if (pcRef.current) {
+      pcRef.current.ontrack = null;
+      pcRef.current.onicecandidate = null;
+      pcRef.current.oniceconnectionstatechange = null;
+      pcRef.current.onconnectionstatechange = null;
+      pcRef.current.close();
+      pcRef.current = null;
+    }
+
+    if (mountedRef.current) {
+      setRemoteStream(null);
+    }
+  }, []);
+
+  const cleanupAll = useCallback(() => {
+    cleanupPeerConnection();
+
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current);
+      channelRef.current = null;
+    }
+
+    localStreamRef.current?.getTracks().forEach((track) => track.stop());
+    localStreamRef.current = null;
+
+    if (mountedRef.current) {
+      setLocalStream(null);
+      setConnected(false);
+      setJoining(false);
+    }
+  }, [cleanupPeerConnection]);
+
   const getLocalStream = useCallback(async () => {
+    if (localStreamRef.current) {
+      return localStreamRef.current;
+    }
+
     try {
-      setStatus("Запрос камеры...");
+      setStatus("Запрашиваю камеру...");
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "user", width: { ideal: 320 }, height: { ideal: 240 } },
         audio: false,
       });
-      if (mountedRef.current) setLocalStream(stream);
-      setStatus("Камера получена");
+      localStreamRef.current = stream;
+      if (mountedRef.current) {
+        setLocalStream(stream);
+      }
+      setStatus("Камера подключена");
       return stream;
-    } catch (e) {
-      setStatus("Камера недоступна");
+    } catch (error) {
+      console.error("[online] local stream error", error);
+      setStatus("Не удалось открыть камеру");
       return null;
     }
   }, [setStatus]);
 
-  const handleDataMessage = useCallback((data: string) => {
-    try {
-      const msg = JSON.parse(data);
-      if (msg.type === "move") {
-        listenersRef.current.forEach((fn) => fn(msg.action, msg.payload));
+  const flushPendingCandidates = useCallback(async (pc: RTCPeerConnection) => {
+    const queued = [...pendingIceCandidatesRef.current];
+    pendingIceCandidatesRef.current = [];
+
+    for (const candidate of queued) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (error) {
+        console.error("[online] failed to flush ICE candidate", error);
       }
-    } catch {}
+    }
   }, []);
 
-  const sendMove = useCallback((action: string, payload: any) => {
-    const dc = dataChannelRef.current;
-    if (dc && dc.readyState === "open") {
-      dc.send(JSON.stringify({ type: "move", action, payload }));
+  const createPeerConnection = useCallback(
+    (isHost: boolean) => {
+      cleanupPeerConnection();
+
+      const pc = new RTCPeerConnection(ICE_SERVERS);
+      pcRef.current = pc;
+
+      const stream = localStreamRef.current;
+      if (stream) {
+        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+      }
+
+      pc.ontrack = (event) => {
+        if (mountedRef.current) {
+          setRemoteStream(event.streams[0] ?? null);
+        }
+        setStatus("Игрок найден, видео подключено ✓");
+      };
+
+      pc.onicecandidate = (event) => {
+        if (!event.candidate || !channelRef.current || !roleRef.current) {
+          return;
+        }
+
+        channelRef.current.send({
+          type: "broadcast",
+          event: "signal",
+          payload: {
+            type: "ice-candidate",
+            candidate: event.candidate.toJSON(),
+            from: roleRef.current,
+          },
+        });
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        const state = pc.iceConnectionState;
+        console.log("[online] ICE", roleRef.current, state);
+
+        if (state === "checking") {
+          setStatus("Игрок в комнате, соединяю видео...");
+        }
+
+        if (state === "connected" || state === "completed") {
+          setStatus("Игрок найден, соединение активно ✓");
+        }
+
+        if (state === "disconnected") {
+          setStatus("Связь нестабильна, пытаюсь восстановить...");
+        }
+
+        if (state === "failed") {
+          setStatus("Игрок в комнате, но видео не подключилось");
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        const state = pc.connectionState;
+        console.log("[online] PC", roleRef.current, state);
+
+        if (state === "failed") {
+          setStatus("Ошибка видео-соединения, игра остаётся доступна");
+        }
+      };
+
+      if (isHost) {
+        offerSentRef.current = false;
+      }
+
+      return pc;
+    },
+    [cleanupPeerConnection, setStatus]
+  );
+
+  const ensurePeerConnection = useCallback(
+    (isHost: boolean) => {
+      return pcRef.current ?? createPeerConnection(isHost);
+    },
+    [createPeerConnection]
+  );
+
+  const handleDataMessage = useCallback((action: string, payload: any) => {
+    listenersRef.current.forEach((listener) => listener(action, payload));
+  }, []);
+
+  const sendOffer = useCallback(async () => {
+    if (!channelRef.current || offerSentRef.current || roleRef.current !== "host") {
+      return;
     }
+
+    const pc = ensurePeerConnection(true);
+
+    try {
+      offerSentRef.current = true;
+      setStatus("Игрок в комнате, отправляю запрос на соединение...");
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      await channelRef.current.send({
+        type: "broadcast",
+        event: "signal",
+        payload: {
+          type: "offer",
+          sdp: { type: offer.type, sdp: offer.sdp },
+        },
+      });
+      setStatus("Оффер отправлен, жду ответ...");
+    } catch (error) {
+      console.error("[online] offer error", error);
+      offerSentRef.current = false;
+      setStatus("Не удалось создать соединение");
+    }
+  }, [ensurePeerConnection, setStatus]);
+
+  const handleSignal = useCallback(
+    async (message: any, isHost: boolean) => {
+      const pc = ensurePeerConnection(isHost);
+
+      if (message.type === "offer" && !isHost) {
+        try {
+          setStatus("Получен оффер, создаю ответ...");
+          await pc.setRemoteDescription(new RTCSessionDescription(message.sdp));
+          remoteDescriptionSetRef.current = true;
+          await flushPendingCandidates(pc);
+
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          await channelRef.current?.send({
+            type: "broadcast",
+            event: "signal",
+            payload: {
+              type: "answer",
+              sdp: { type: answer.type, sdp: answer.sdp },
+            },
+          });
+          setStatus("Ответ отправлен, завершаю соединение...");
+        } catch (error) {
+          console.error("[online] answer error", error);
+          setStatus("Не удалось ответить на подключение");
+        }
+        return;
+      }
+
+      if (message.type === "answer" && isHost) {
+        try {
+          setStatus("Получен ответ, подключаю видео...");
+          await pc.setRemoteDescription(new RTCSessionDescription(message.sdp));
+          remoteDescriptionSetRef.current = true;
+          await flushPendingCandidates(pc);
+        } catch (error) {
+          console.error("[online] remote answer error", error);
+          setStatus("Не удалось завершить соединение");
+        }
+        return;
+      }
+
+      if (message.type === "ice-candidate" && message.candidate) {
+        if (!remoteDescriptionSetRef.current) {
+          pendingIceCandidatesRef.current.push(message.candidate);
+          return;
+        }
+
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
+        } catch (error) {
+          console.error("[online] ICE candidate error", error);
+        }
+      }
+    },
+    [ensurePeerConnection, flushPendingCandidates, setStatus]
+  );
+
+  const bindChannel = useCallback(
+    async (room: string, isHost: boolean) => {
+      const channel = supabase.channel(`room-${room}`, {
+        config: {
+          broadcast: { self: false },
+          presence: { key: sessionIdRef.current },
+        },
+      });
+
+      channelRef.current = channel;
+
+      channel.on("broadcast", { event: "move" }, ({ payload }: any) => {
+        handleDataMessage(payload.action, payload.payload);
+      });
+
+      channel.on("broadcast", { event: "signal" }, ({ payload }: any) => {
+        console.log("[online] signal", payload?.type);
+        void handleSignal(payload, isHost);
+      });
+
+      channel.on("presence", { event: "sync" }, () => {
+        const presenceState = channel.presenceState() as Record<string, unknown[]>;
+        const participantCount = Object.keys(presenceState).length;
+        const hasPeer = participantCount > 1;
+
+        if (mountedRef.current) {
+          setConnected(hasPeer);
+          setJoining(!hasPeer && !isHost);
+        }
+
+        if (hasPeer) {
+          setStatus(isHost ? "Игрок вошёл в комнату" : "Хост найден, синхронизация... ");
+          if (isHost && !offerSentRef.current) {
+            void sendOffer();
+          }
+          return;
+        }
+
+        cleanupPeerConnection();
+        setStatus(isHost ? "Комната создана, жду игрока..." : "Зашёл в комнату, жду хоста...");
+      });
+
+      channel.subscribe((status) => {
+        console.log("[online] channel", status);
+
+        if (status === "SUBSCRIBED") {
+          setStatus(isHost ? "Комната создана, жду игрока..." : "Подключился к комнате...");
+          void channel.track({
+            sessionId: sessionIdRef.current,
+            role: isHost ? "host" : "guest",
+            joinedAt: new Date().toISOString(),
+          });
+        }
+
+        if (status === "CHANNEL_ERROR") {
+          setStatus("Ошибка канала связи");
+        }
+
+        if (status === "TIMED_OUT") {
+          setStatus("Таймаут соединения с комнатой");
+        }
+      });
+    },
+    [cleanupPeerConnection, handleDataMessage, handleSignal, sendOffer, setStatus]
+  );
+
+  const sendMove = useCallback((action: string, payload: any) => {
+    if (!channelRef.current) {
+      return;
+    }
+
+    channelRef.current.send({
+      type: "broadcast",
+      event: "move",
+      payload: { action, payload },
+    });
   }, []);
 
   const onMove = useCallback((listener: MoveListener) => {
     listenersRef.current.add(listener);
-    return () => { listenersRef.current.delete(listener); };
+    return () => {
+      listenersRef.current.delete(listener);
+    };
   }, []);
 
-  const startAsHost = useCallback(async (room: string) => {
-    setStatus("Получаю камеру...");
-    const stream = await getLocalStream();
+  const createRoom = useCallback(async () => {
+    cleanupAll();
 
-    const pc = new RTCPeerConnection(ICE_SERVERS);
-    pcRef.current = pc;
-
-    if (stream) {
-      stream.getTracks().forEach((t) => pc.addTrack(t, stream));
-    }
-
-    pc.ontrack = (e) => {
-      setStatus("Получен видеопоток соперника");
-      if (mountedRef.current) setRemoteStream(e.streams[0]);
-    };
-
-    pc.oniceconnectionstatechange = () => {
-      const s = pc.iceConnectionState;
-      console.log("[host] ICE:", s);
-      if (s === "connected" || s === "completed") {
-        setStatus("Соединение установлено ✓");
-        if (mountedRef.current) setConnected(true);
-      }
-      if (s === "disconnected") setStatus("Соединение прервано");
-      if (s === "failed") setStatus("Соединение не удалось ✗");
-    };
-
-    // Data channel for game moves
-    const dc = pc.createDataChannel("game");
-    dc.onopen = () => {
-      setStatus("Канал данных открыт ✓");
-      if (mountedRef.current) setConnected(true);
-    };
-    dc.onmessage = (e) => handleDataMessage(e.data);
-    dataChannelRef.current = dc;
-
-    // Signaling via Supabase broadcast
-    const channel = supabase.channel(`room-${room}`, {
-      config: { broadcast: { self: false } },
-    });
-    channelRef.current = channel;
-
-    let pendingCandidates: RTCIceCandidateInit[] = [];
-
-    pc.onicecandidate = (e) => {
-      if (e.candidate) {
-        channel.send({
-          type: "broadcast",
-          event: "signal",
-          payload: { type: "ice-candidate", candidate: e.candidate.toJSON(), from: "host" },
-        });
-      }
-    };
-
-    channel.on("broadcast", { event: "signal" }, async ({ payload }: any) => {
-      const msg = payload;
-      console.log("[host] got signal:", msg.type);
-
-      if (msg.type === "join") {
-        setStatus("Гость подключается, создаю оффер...");
-        try {
-          // Reset connection if we were already negotiating
-          if (pc.signalingState !== "stable") {
-            console.log("[host] not stable, ignoring join");
-            return;
-          }
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          setStatus("Оффер отправлен, жду ответ...");
-          channel.send({
-            type: "broadcast",
-            event: "signal",
-            payload: { type: "offer", sdp: { type: offer.type, sdp: offer.sdp } },
-          });
-        } catch (e) {
-          console.error("[host] offer error:", e);
-          setStatus("Ошибка создания оффера");
-        }
-      }
-
-      if (msg.type === "answer") {
-        setStatus("Получен ответ, устанавливаю соединение...");
-        try {
-          if (pc.signalingState !== "have-local-offer") {
-            console.log("[host] ignoring answer, state:", pc.signalingState);
-            return;
-          }
-          await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-          // Flush pending ICE candidates
-          for (const c of pendingCandidates) {
-            try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
-          }
-          pendingCandidates = [];
-          setStatus("Ответ принят, ожидаю ICE...");
-        } catch (e) {
-          console.error("[host] answer error:", e);
-          setStatus("Ошибка обработки ответа");
-        }
-      }
-
-      if (msg.type === "ice-candidate" && msg.candidate && msg.from !== "host") {
-        if (!pc.remoteDescription) {
-          pendingCandidates.push(msg.candidate);
-        } else {
-          try { await pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); } catch {}
-        }
-      }
-    });
-
-    channel.subscribe((status) => {
-      console.log("[host] channel status:", status);
-      if (status === "SUBSCRIBED") {
-        setStatus("Комната создана, жду гостя...");
-      }
-    });
-  }, [getLocalStream, handleDataMessage, setStatus]);
-
-  const startAsGuest = useCallback(async (room: string) => {
-    setStatus("Получаю камеру...");
-    const stream = await getLocalStream();
-
-    const pc = new RTCPeerConnection(ICE_SERVERS);
-    pcRef.current = pc;
-
-    if (stream) {
-      stream.getTracks().forEach((t) => pc.addTrack(t, stream));
-    }
-
-    pc.ontrack = (e) => {
-      setStatus("Получен видеопоток хоста");
-      if (mountedRef.current) setRemoteStream(e.streams[0]);
-    };
-
-    pc.oniceconnectionstatechange = () => {
-      const s = pc.iceConnectionState;
-      console.log("[guest] ICE:", s);
-      if (s === "connected" || s === "completed") {
-        setStatus("Соединение установлено ✓");
-        if (mountedRef.current) {
-          setConnected(true);
-          setJoining(false);
-        }
-      }
-      if (s === "disconnected") setStatus("Соединение прервано");
-      if (s === "failed") setStatus("Соединение не удалось ✗");
-    };
-
-    pc.ondatachannel = (e) => {
-      const dc = e.channel;
-      dc.onopen = () => {
-        setStatus("Канал данных открыт ✓");
-        if (mountedRef.current) setConnected(true);
-      };
-      dc.onmessage = (ev) => handleDataMessage(ev.data);
-      dataChannelRef.current = dc;
-    };
-
-    const channel = supabase.channel(`room-${room}`, {
-      config: { broadcast: { self: false } },
-    });
-    channelRef.current = channel;
-
-    let pendingCandidates: RTCIceCandidateInit[] = [];
-
-    pc.onicecandidate = (e) => {
-      if (e.candidate) {
-        channel.send({
-          type: "broadcast",
-          event: "signal",
-          payload: { type: "ice-candidate", candidate: e.candidate.toJSON(), from: "guest" },
-        });
-      }
-    };
-
-    channel.on("broadcast", { event: "signal" }, async ({ payload }: any) => {
-      const msg = payload;
-      console.log("[guest] got signal:", msg.type);
-
-      if (msg.type === "offer") {
-        setStatus("Получен оффер, создаю ответ...");
-        try {
-          await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-          // Flush pending ICE candidates
-          for (const c of pendingCandidates) {
-            try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
-          }
-          pendingCandidates = [];
-
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          setStatus("Ответ отправлен, ожидаю ICE...");
-          channel.send({
-            type: "broadcast",
-            event: "signal",
-            payload: { type: "answer", sdp: { type: answer.type, sdp: answer.sdp } },
-          });
-        } catch (e) {
-          console.error("[guest] answer error:", e);
-          setStatus("Ошибка создания ответа");
-        }
-      }
-
-      if (msg.type === "ice-candidate" && msg.candidate && msg.from !== "guest") {
-        if (!pc.remoteDescription) {
-          pendingCandidates.push(msg.candidate);
-        } else {
-          try { await pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); } catch {}
-        }
-      }
-    });
-
-    channel.subscribe((status) => {
-      console.log("[guest] channel status:", status);
-      if (status === "SUBSCRIBED") {
-        setStatus("Подключён к комнате, отправляю запрос...");
-        // Send join signal, retry a few times
-        const sendJoin = () => {
-          channel.send({ type: "broadcast", event: "signal", payload: { type: "join" } });
-        };
-        sendJoin();
-        // Retry join every 2 seconds, up to 5 times
-        let retries = 0;
-        const interval = setInterval(() => {
-          retries++;
-          if (!mountedRef.current || pc.remoteDescription || retries > 5) {
-            clearInterval(interval);
-            if (mountedRef.current && !pc.remoteDescription && retries > 5) {
-              setStatus("Хост не отвечает. Перезагрузите страницу.");
-              setJoining(false);
-            }
-            return;
-          }
-          setStatus(`Повторная попытка подключения (${retries}/5)...`);
-          sendJoin();
-        }, 2000);
-      }
-    });
-  }, [getLocalStream, handleDataMessage, setStatus]);
-
-  const createRoom = useCallback(() => {
     const id = generateRoomId();
     setRoomId(id);
     setRole("host");
-    startAsHost(id);
-  }, [startAsHost]);
+    roleRef.current = "host";
+    setJoining(false);
 
-  // Auto-join if URL has ?room=
+    await getLocalStream();
+    await bindChannel(id, true);
+  }, [bindChannel, cleanupAll, getLocalStream]);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const room = params.get("room");
-    if (!room) return;
+    if (!room) {
+      setStatus("Создай комнату для старта");
+      return;
+    }
 
     setRoomId(room);
     setRole("guest");
+    roleRef.current = "guest";
     setJoining(true);
-    startAsGuest(room);
+
+    void (async () => {
+      await getLocalStream();
+      await bindChannel(room, false);
+    })();
 
     return () => {
-      mountedRef.current = false;
-      pcRef.current?.close();
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-      }
+      cleanupAll();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [bindChannel, cleanupAll, getLocalStream, setStatus]);
 
   return {
     role,
