@@ -41,17 +41,16 @@ function Hearts({ count }: { count: number }) {
   );
 }
 
-function Cell({ state, dimmed, onClick, showAsChip }: { state: CellState; dimmed: boolean; onClick?: () => void; showAsChip?: boolean }) {
+function Cell({ state, dimmed, onClick }: { state: CellState; dimmed: boolean; onClick?: () => void }) {
   const base = "w-9 h-9 flex items-center justify-center rounded-sm border transition-all duration-150";
   let bg: string;
   let content: React.ReactNode = <span className="text-base">🥔</span>;
-  let clickable = !!onClick;
+  const clickable = !!onClick;
 
-  if (state === "marked" && !showAsChip) { bg = "bg-destructive border-destructive/60"; content = <span className="text-base">☠️</span>; clickable = false; }
-  else if (state === "marked" && showAsChip) { bg = "bg-primary border-primary/60 shadow-[inset_-1px_-1px_0] shadow-primary/30"; }
-  else if (state === "revealed-safe") { bg = "bg-[hsl(var(--cell-safe))] border-[hsl(var(--cell-safe-border))]"; content = null; clickable = false; }
-  else if (state === "revealed-bomb") { bg = "bg-[hsl(var(--cell-bomb))] border-[hsl(var(--cell-bomb-border))]"; content = <span className="text-base">💣</span>; clickable = false; }
-  else if (dimmed) { bg = "bg-[hsl(var(--cell-dim))] border-[hsl(var(--cell-dim-border))]"; clickable = false; }
+  if (state === "marked") { bg = "bg-destructive border-destructive/60"; content = <span className="text-base">☠️</span>; }
+  else if (state === "revealed-safe") { bg = "bg-[hsl(var(--cell-safe))] border-[hsl(var(--cell-safe-border))]"; content = null; }
+  else if (state === "revealed-bomb") { bg = "bg-[hsl(var(--cell-bomb))] border-[hsl(var(--cell-bomb-border))]"; content = <span className="text-base">💣</span>; }
+  else if (dimmed) { bg = "bg-[hsl(var(--cell-dim))] border-[hsl(var(--cell-dim-border))]"; }
   else { bg = "bg-primary border-primary/60 shadow-[inset_-1px_-1px_0] shadow-primary/30"; }
 
   return (
@@ -82,10 +81,9 @@ function BoardGrid({ board, owner, G, onSetupClick, onPlayClick }: {
         {board.map((c, i) => {
           let dimmed = false;
           let click: (() => void) | undefined;
-          // Во время игры метки выглядят как обычные чипсы (showAsChip), но кликабельны
           const isPlaying = G.phase === "playing";
 
-          if (isSetup && c === "hidden") {
+          if (isSetup && (c === "hidden" || c === "marked")) {
             if ((isP1S && owner === 2) || (!isP1S && owner === 1)) click = () => onSetupClick(i);
             else dimmed = true;
           } else if (isPlaying && (c === "hidden" || c === "marked")) {
@@ -94,7 +92,7 @@ function BoardGrid({ board, owner, G, onSetupClick, onPlayClick }: {
           }
           if (c !== "hidden" && c !== "marked") { click = undefined; dimmed = false; }
 
-          return <Cell key={i} state={c} dimmed={dimmed} onClick={click} showAsChip={isPlaying && c === "marked"} />;
+          return <Cell key={i} state={c} dimmed={dimmed} onClick={click} />;
         })}
       </div>
     </div>
