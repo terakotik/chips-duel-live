@@ -41,27 +41,22 @@ function Hearts({ count }: { count: number }) {
   );
 }
 
-function Cell({ state, dimmed, onClick, owner }: { state: CellState; dimmed: boolean; onClick?: () => void; owner: 1 | 2 }) {
+function Cell({ state, onClick, owner }: { state: CellState; dimmed: boolean; onClick?: () => void; owner: 1 | 2 }) {
   const base = "w-9 h-9 flex items-center justify-center rounded-sm border transition-all duration-150";
-  // Цвет ячейки всегда зависит только от владельца доски — никогда не меняется
   const ownerBg = owner === 1
     ? "bg-[hsl(45,80%,55%)] border-[hsl(45,80%,40%)]"
     : "bg-[hsl(145,40%,40%)] border-[hsl(145,40%,30%)]";
-  const dimBg = owner === 1
-    ? "bg-[hsl(45,40%,35%)] border-[hsl(45,40%,25%)]"
-    : "bg-[hsl(145,20%,25%)] border-[hsl(145,20%,18%)]";
-  const bg = dimmed ? dimBg : ownerBg;
 
   let content: React.ReactNode = <span className="text-base">🥔</span>;
   const clickable = !!onClick;
 
-  if (state === "marked") { content = <span className="text-base">☠️</span>; }
-  else if (state === "revealed-safe") { content = null; }
-  else if (state === "revealed-bomb") { content = <span className="text-base">💣</span>; }
+  if (state === "marked") content = <span className="text-base">☠️</span>;
+  else if (state === "revealed-safe") content = null;
+  else if (state === "revealed-bomb") content = <span className="text-base">💣</span>;
 
   return (
     <div
-      className={`${base} ${bg} ${clickable ? "cursor-pointer active:scale-90" : "cursor-default"}`}
+      className={`${base} ${ownerBg} ${clickable ? "cursor-pointer active:scale-90" : "cursor-default"}`}
       onClick={clickable ? onClick : undefined}
     >
       {content}
