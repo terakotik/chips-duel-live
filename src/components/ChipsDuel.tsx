@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import ChipSvg from "./ChipSvg";
+import chipImg from "@/assets/chip.png";
 const CELLS = 9;
 const BOMBS = 3;
 const LIVES = 3;
@@ -44,7 +44,7 @@ function Hearts({ count }: { count: number }) {
 function Cell({ state, dimmed, onClick }: { state: CellState; dimmed: boolean; onClick?: () => void }) {
   const base = "w-9 h-9 flex items-center justify-center rounded-sm border transition-all duration-150";
   let bg: string;
-  let content: React.ReactNode = <ChipSvg />;
+  let content: React.ReactNode = <img src={chipImg} alt="" className="w-7 h-7 object-contain" />;
   let clickable = !!onClick;
 
   if (state === "marked") { bg = "bg-destructive border-destructive/60"; content = <span className="text-base">☠️</span>; clickable = false; }
