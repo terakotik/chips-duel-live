@@ -48,7 +48,7 @@ function Cell({ state, dimmed, onClick }: { state: CellState; dimmed: boolean; o
   let clickable = !!onClick;
 
   if (state === "marked") { bg = "bg-destructive border-destructive/60"; content = <span className="text-base">☠️</span>; clickable = false; }
-  else if (state === "revealed-safe") { bg = "bg-[hsl(var(--cell-safe))] border-[hsl(var(--cell-safe-border))]"; content = <span className="text-base">😋</span>; clickable = false; }
+  else if (state === "revealed-safe") { bg = "bg-[hsl(var(--cell-safe))] border-[hsl(var(--cell-safe-border))]"; content = null; clickable = false; }
   else if (state === "revealed-bomb") { bg = "bg-[hsl(var(--cell-bomb))] border-[hsl(var(--cell-bomb-border))]"; content = <span className="text-base">💣</span>; clickable = false; }
   else if (dimmed) { bg = "bg-[hsl(var(--cell-dim))] border-[hsl(var(--cell-dim-border))]"; clickable = false; }
   else { bg = "bg-primary border-primary/60 shadow-[inset_-1px_-1px_0] shadow-primary/30"; }
