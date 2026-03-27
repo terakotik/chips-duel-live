@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import chipImg from "@/assets/chip.png";
+
 const CELLS = 9;
 const BOMBS = 3;
 const LIVES = 3;
@@ -41,13 +41,14 @@ function Hearts({ count }: { count: number }) {
   );
 }
 
-function Cell({ state, dimmed, onClick }: { state: CellState; dimmed: boolean; onClick?: () => void }) {
+function Cell({ state, dimmed, onClick, showAsChip }: { state: CellState; dimmed: boolean; onClick?: () => void; showAsChip?: boolean }) {
   const base = "w-9 h-9 flex items-center justify-center rounded-sm border transition-all duration-150";
   let bg: string;
-  let content: React.ReactNode = <img src={chipImg} alt="" className="w-7 h-7 object-contain" />;
+  let content: React.ReactNode = <span className="text-base">🥔</span>;
   let clickable = !!onClick;
 
-  if (state === "marked") { bg = "bg-destructive border-destructive/60"; content = <span className="text-base">☠️</span>; clickable = false; }
+  if (state === "marked" && !showAsChip) { bg = "bg-destructive border-destructive/60"; content = <span className="text-base">☠️</span>; clickable = false; }
+  else if (state === "marked" && showAsChip) { bg = "bg-primary border-primary/60 shadow-[inset_-1px_-1px_0] shadow-primary/30"; }
   else if (state === "revealed-safe") { bg = "bg-[hsl(var(--cell-safe))] border-[hsl(var(--cell-safe-border))]"; content = null; clickable = false; }
   else if (state === "revealed-bomb") { bg = "bg-[hsl(var(--cell-bomb))] border-[hsl(var(--cell-bomb-border))]"; content = <span className="text-base">💣</span>; clickable = false; }
   else if (dimmed) { bg = "bg-[hsl(var(--cell-dim))] border-[hsl(var(--cell-dim-border))]"; clickable = false; }
@@ -73,23 +74,27 @@ function BoardGrid({ board, owner, G, onSetupClick, onPlayClick }: {
   return (
     <div className="flex flex-col items-center gap-0.5">
       <span className="text-[6px] text-foreground/50">P{owner}</span>
-      <div className="grid grid-cols-3 gap-[3px] bg-[hsl(var(--board-bg))] p-1 rounded border border-[hsl(var(--board-border))]">
+      <div className={`grid grid-cols-3 gap-[3px] p-1 rounded border ${
+        owner === 1
+          ? "bg-[hsl(40,60%,20%)] border-[hsl(40,60%,30%)]"
+          : "bg-[hsl(200,50%,20%)] border-[hsl(200,50%,30%)]"
+      }`}>
         {board.map((c, i) => {
           let dimmed = false;
           let click: (() => void) | undefined;
-          // Метки всегда видны зрителю
-          const displayState = c;
+          // Во время игры метки выглядят как обычные чипсы (showAsChip), но кликабельны
+          const isPlaying = G.phase === "playing";
 
           if (isSetup && c === "hidden") {
             if ((isP1S && owner === 2) || (!isP1S && owner === 1)) click = () => onSetupClick(i);
             else dimmed = true;
-          } else if (G.phase === "playing" && (c === "hidden" || c === "marked")) {
+          } else if (isPlaying && (c === "hidden" || c === "marked")) {
             if ((G.cur === 1 && owner === 2) || (G.cur === 2 && owner === 1)) click = () => onPlayClick(owner, i);
             else dimmed = true;
           }
-          if (displayState !== "hidden" && displayState !== "marked") { click = undefined; dimmed = false; }
+          if (c !== "hidden" && c !== "marked") { click = undefined; dimmed = false; }
 
-          return <Cell key={i} state={displayState} dimmed={dimmed} onClick={click} />;
+          return <Cell key={i} state={c} dimmed={dimmed} onClick={click} showAsChip={isPlaying && c === "marked"} />;
         })}
       </div>
     </div>
