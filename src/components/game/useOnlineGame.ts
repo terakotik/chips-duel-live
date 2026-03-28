@@ -354,21 +354,21 @@ export function useOnlineGame(): OnlineGameReturn {
         const participantCount = Object.keys(presenceState).length;
         const hasPeer = participantCount > 1;
 
-        if (mountedRef.current) {
-          setConnected(hasPeer);
-          setJoining(!hasPeer && !isHost);
-        }
-
         if (hasPeer) {
-          setStatus(isHost ? "Игрок вошёл в комнату" : "Хост найден, синхронизация... ");
+          if (mountedRef.current) {
+            setConnected(true);
+            setJoining(false);
+          }
+          setStatus(isHost ? "Игрок вошёл в комнату" : "Хост найден, синхронизация...");
           if (isHost && !offerSentRef.current) {
             void sendOffer();
           }
-          return;
+        } else if (!mountedRef.current) {
+          // do nothing
+        } else {
+          // Only show waiting status if we were never connected
+          setStatus(isHost ? "Комната создана, жду игрока..." : "Зашёл в комнату, жду хоста...");
         }
-
-        cleanupPeerConnection();
-        setStatus(isHost ? "Комната создана, жду игрока..." : "Зашёл в комнату, жду хоста...");
       });
 
       channel.subscribe((status) => {
